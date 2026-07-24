@@ -462,42 +462,6 @@
   <div class="sb-section">Dashboard</div>
   <nav><ul>
     <li><a href="https://restor3dindia.netlify.app/"><i class="fa fa-home"></i>Dashboard</a></li>
-    <li><a href="data-genie.html" class="active"><i class="fa fa-bolt"></i>Data Genie</a></li>
-    <li><div class="sb-item" onclick="toggleSub(this)"><i class="fa fa-chart-pie icon"></i>Overview<i class="fa fa-chevron-down sb-arrow"></i></div>
-      <ul class="sb-sub">
-        <li><a href="https://restor3dindia.netlify.app/overview-team-metrics">Daily Utilization</a></li>
-        <li><a href="https://restor3dindia.netlify.app/overview-graphs">Team Metrics</a></li>
-        <li><a href="https://restor3dindia.netlify.app/overview-process-metrics">Process Metrics</a></li>
-        <li><a href="https://restor3dindia.netlify.app/last-day-targets">Last Day Targets</a></li>
-        <li><a href="https://restor3dindia.netlify.app/bq-metrics">BigQuery</a></li>
-      </ul></li>
-    <li><a href="https://restor3dindia.netlify.app/metrics"><i class="fa fa-chart-bar"></i>My Metrics</a></li>
-    <li><a href="https://restor3dindia.netlify.app/assignments"><i class="fa fa-tasks"></i>Assignment</a></li>
-  </ul></nav>
-  <div class="sb-section">Applications</div>
-  <nav><ul>
-    <li><a href="https://outlook.office.com/" target="_blank"><i class="fa fa-envelope"></i>Email</a></li>
-    <li><a href="https://teams.cloud.microsoft/" target="_blank"><i class="fa fa-comments"></i>Teams</a></li>
-    <li><a href="https://restor3dindia.netlify.app/todo"><i class="fa fa-check-square"></i>Todo</a></li>
-    <li><div class="sb-item" onclick="toggleSub(this)"><i class="fa fa-link icon"></i>Links<i class="fa fa-chevron-down sb-arrow"></i></div>
-      <ul class="sb-sub">
-        <li><a href="https://restor3dindia.netlify.app/trainings">Trainings</a></li>
-        <li><a href="https://restor3dindia.netlify.app/dashboards">Dashboards</a></li>
-        <li><a href="https://restor3dindia.netlify.app/instructions">Work Instructions</a></li>
-        <li><a href="https://restor3dindia.netlify.app/design-times">Design Times</a></li>
-        <li><a href="https://restor3dindia.netlify.app/overtime">Overtime</a></li>
-        <li><a href="https://restor3dindia.netlify.app/holidays">Holidays</a></li>
-        <li><a href="https://restor3dindia.netlify.app/leaves">Leaves</a></li>
-      </ul></li>
-    <li><div class="sb-item" onclick="toggleSub(this)"><i class="fa fa-users icon"></i>HR Management<i class="fa fa-chevron-down sb-arrow"></i></div>
-      <ul class="sb-sub">
-        <li><a href="https://restor3dindia.netlify.app/hiring">Hiring Process</a></li>
-        <li><a href="https://restor3dindia.netlify.app/forecast">Forecast</a></li>
-        <li><a href="https://restor3dindia.netlify.app/current-staff">Current Staff</a></li>
-      </ul></li>
-    <li><a href="https://restor3dindia.netlify.app/ncrs"><i class="fa fa-exclamation-triangle"></i>NCRs</a></li>
-    <li><a href="https://restor3dindia.netlify.app/skill-matrix"><i class="fa fa-th"></i>Skill Matrix</a></li>
-    <li><a href="https://restor3dindia.netlify.app/contacts"><i class="fa fa-address-book"></i>Contacts</a></li>
   </ul></nav>
   <div class="sb-collapse-btn" onclick="toggleSidebar()" title="Collapse sidebar">
     <i class="fa fa-chevron-left" id="sbCollapseIcon"></i>
@@ -528,16 +492,18 @@
           <button class="btn-sm btn-accent" onclick="applyFilters()"><i class="fa fa-check"></i> Apply</button>
         </div>
       </div>
-      <div class="date-presets">
-        <span class="date-preset" onclick="setDatePreset(this,7)">Last 7 Days</span>
-        <span class="date-preset" onclick="setDatePreset(this,14)">Last 2 Weeks</span>
-        <span class="date-preset" onclick="setDatePreset(this,28)">Last 4 Weeks</span>
-        <span class="date-preset" onclick="setDatePreset(this,56)">Last 8 Weeks</span>
-        <span class="date-preset" onclick="setDatePreset(this,180)">Last 6 Months</span>
-        <span class="date-preset" onclick="setDatePreset(this,365)">Last 12 Months</span>
-        <span class="date-preset" onclick="setAllTime(this)">All Time</span>
-        <span class="date-preset" onclick="setMonthPicker(this)">Select Month</span>
-        <span class="date-preset" onclick="setCustomRange(this)">Custom Range</span>
+      <div class="date-presets" id="r3idDatePresets">
+        <select class="date-input" id="r3idDatePresetSelect" onchange="handleR3idDateSelect(this.value)">
+          <option value="7">Last 7 Days</option>
+          <option value="14">Last 2 Weeks</option>
+          <option value="28">Last 4 Weeks</option>
+          <option value="56">Last 8 Weeks</option>
+          <option value="180" selected>Last 6 Months</option>
+          <option value="365">Last 12 Months</option>
+          <option value="all">All Time</option>
+          <option value="month">Select Month</option>
+          <option value="custom">Custom Range</option>
+        </select>
       </div>
       <div class="month-picker-row" id="monthPickerRow"><select class="date-input" id="monthPicker" onchange="applyMonthPicker()"><option value="">Select month...</option></select></div>
       <div class="custom-date-row" id="customDateRow">
@@ -951,7 +917,7 @@ Chart.register(ChartDataLabels);
 
 // ── APP CONFIG ──
 // Update API_BASE_URL when deploying to a different environment
-const API_BASE_URL = 'PASTE_R3ID_RAILWAY_URL_HERE'; // TODO: set to this service's actual deployed Railway URL
+const API_BASE_URL = 'https://r3id-app-production.up.railway.app'; // TODO: set to this service's actual deployed Railway URL
 const API = API_BASE_URL; // alias used throughout
 
 // HTML escape helper — use for all dynamic values inserted into innerHTML
@@ -2168,7 +2134,7 @@ function copyChart(canvasId, label, e){
   }
 }
 // Default to expanded so the dashboards are visible — users click headings to collapse.
-let r3idCollapsed = true;
+let r3idCollapsed = false;
 let csCollapsed = true;
 
 function toggleR3IDFilters(){
@@ -2311,6 +2277,7 @@ function addForecastToChart(chartInstance, labels, byMonth, granularity, color){
 document.addEventListener('DOMContentLoaded',async()=>{
   populateMonthPicker();buildStaticLists();  await loadConfig();
   applyInitialCollapseState();
+  handleR3idDateSelect('180');
   loadCaseTypes();
   document.addEventListener('click',e=>{
     document.querySelectorAll('.ms-dropdown.open').forEach(dd=>{if(!dd.closest('.ms-wrap').contains(e.target)){dd.classList.remove('open');dd.previousElementSibling.classList.remove('open');}});
@@ -2476,6 +2443,26 @@ function setDatePreset(el,days){document.querySelectorAll('.date-preset').forEac
 function setAllTime(el){document.querySelectorAll('.date-preset').forEach(e=>e.classList.remove('active'));el.classList.add('active');document.getElementById('customDateRow').classList.remove('show');document.getElementById('monthPickerRow').classList.remove('show');dateFrom='';dateTo='';isAllTime=true;document.getElementById('dateFrom').value='';document.getElementById('dateTo').value='';}
 function setCustomRange(el){document.querySelectorAll('.date-preset').forEach(e=>e.classList.remove('active'));el.classList.add('active');document.getElementById('customDateRow').classList.add('show');document.getElementById('monthPickerRow').classList.remove('show');isAllTime=false;}
 function setMonthPicker(el){document.querySelectorAll('.date-preset').forEach(e=>e.classList.remove('active'));el.classList.add('active');document.getElementById('monthPickerRow').classList.add('show');document.getElementById('customDateRow').classList.remove('show');isAllTime=false;}
+function handleR3idDateSelect(val){
+  document.getElementById('customDateRow').classList.remove('show');
+  document.getElementById('monthPickerRow').classList.remove('show');
+  if(val==='all'){
+    dateFrom='';dateTo='';isAllTime=true;
+    document.getElementById('dateFrom').value='';document.getElementById('dateTo').value='';
+  }else if(val==='month'){
+    document.getElementById('monthPickerRow').classList.add('show');
+    isAllTime=false;
+  }else if(val==='custom'){
+    document.getElementById('customDateRow').classList.add('show');
+    isAllTime=false;
+  }else{
+    const days=parseInt(val,10);
+    const to=new Date(),from=new Date();from.setDate(from.getDate()-days);
+    dateTo=to.toISOString().split('T')[0];dateFrom=from.toISOString().split('T')[0];
+    document.getElementById('dateFrom').value=dateFrom;document.getElementById('dateTo').value=dateTo;
+    isAllTime=false;
+  }
+}
 function applyMonthPicker(){
   const val=document.getElementById('monthPicker').value;
   if(!val)return;
