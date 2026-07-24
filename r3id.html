@@ -536,8 +536,8 @@
           <button class="kpi-calc-btn" style="height:30px;width:auto;padding:0 10px;margin:0" id="loadStepsBtn" onclick="loadSteps()"><i class="fa fa-sync"></i> Load</button>
         </div>
         <div class="ms-wrap">
-          <div class="ms-label">Group <span style="font-weight:400;color:var(--text-4);font-size:9px">(auto-selects matching users below)</span></div>
-          <select id="groupSelect" onchange="onGroupSelect(this.value)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg-input);color:var(--text-1)">
+          <div class="ms-label" title="Selecting a group auto-checks its matching users in the User list below">Group</div>
+          <select id="groupSelect" onchange="onGroupSelect(this.value)" class="ms-btn" style="height:auto">
             <option value="">— Select a group —</option>
           </select>
         </div>
