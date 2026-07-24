@@ -719,6 +719,62 @@ def volume_case_joins():
         LEFT JOIN signoff_dates sd ON f.id = sd.caseId
         LEFT JOIN {tbl('vw_lkup_stage_log_dates')} s ON f.id = s.caseId"""
 
+def volume_case_joins_full():
+    """Same population as volume_case_joins() (raw Case table, no Case_In_Take restriction,
+    includes COMPLETED cases) but also joins vw_fact_case for denormalized display fields
+    (surgeon, facility, etc.) plus on_hold_time and case-notes — so this can back a full
+    case-list response (case_select_fields-equivalent), not just chart aggregation."""
+    return f"""
+        FROM {tbl('Case')} f
+        LEFT JOIN {tbl('CaseCategory')} cc ON f.caseCategoryId = cc.id
+        LEFT JOIN {tbl('CaseType')} ct ON f.caseTypeId = ct.id
+        LEFT JOIN signoff_dates sd ON f.id = sd.caseId
+        LEFT JOIN {tbl('vw_lkup_stage_log_dates')} s ON f.id = s.caseId
+        LEFT JOIN {tbl('vw_fact_case')} vf ON f.id = vf.id
+        LEFT JOIN on_hold_time oh ON f.id = oh.caseId
+        LEFT JOIN {tbl('vw_lkup_last_case_notes')} cn ON f.id = cn.caseid"""
+
+def volume_case_select_fields():
+    """case_select_fields()-equivalent for the raw-Case-table (volume) population —
+    denormalized display fields pulled from vw_fact_case (vf) with a fallback to the
+    raw Case/CaseCategory columns (f/cc) for cases vw_fact_case excludes (COMPLETED)."""
+    return f"""
+        f.id, CONCAT(f.count, '_', COALESCE(vf.alias, CAST(f.id AS STRING))) as alias,
+        COALESCE(vf.alias, CAST(f.id AS STRING)) as alias_short, f.count as case_number,
+        COALESCE(vf.case_category_name, cc.name) as case_category_name,
+        COALESCE(vf.phase, f.phase) as phase,
+        vf.phy_nameFirst, vf.phy_nameLast, vf.fac_name, vf.fac_state,
+        COALESCE(vf.laterality, f.laterality) as laterality,
+        COALESCE(vf.onHold, f.onHold) as onHold,
+        COALESCE(vf.createdAt, f.createdAt) as createdAt,
+        s.first_scan_upload_date, s.ship_wrk_comp_date,
+        sd.seg_review_date, sd.first_psp_review_date, sd.surgeon_approval_date,
+        COALESCE(oh.total_hold_days, 0) as onhold_days,
+        CASE WHEN s.ship_wrk_comp_date IS NOT NULL AND s.first_scan_upload_date IS NOT NULL
+            THEN TIMESTAMP_DIFF(s.ship_wrk_comp_date, s.first_scan_upload_date, DAY) - COALESCE(oh.total_hold_days, 0)
+            ELSE NULL END as total_lt,
+        CASE WHEN sd.seg_review_date IS NOT NULL AND s.first_scan_upload_date IS NOT NULL
+            THEN TIMESTAMP_DIFF(sd.seg_review_date, s.first_scan_upload_date, DAY)
+            ELSE NULL END as seg_lt,
+        CASE WHEN sd.surgeon_approval_date IS NOT NULL AND sd.first_psp_review_date IS NOT NULL
+            THEN TIMESTAMP_DIFF(sd.surgeon_approval_date, sd.first_psp_review_date, DAY)
+            ELSE NULL END as surgeon_lt,
+        CASE WHEN sd.peer_review_date IS NOT NULL AND s.first_scan_upload_date IS NOT NULL
+            THEN GREATEST(0, LEAST(
+                TIMESTAMP_DIFF(sd.peer_review_date, s.first_scan_upload_date, DAY)
+                    - COALESCE(oh.total_hold_days, 0)
+                    - GREATEST(0, COALESCE(TIMESTAMP_DIFF(sd.surgeon_approval_date, sd.first_psp_review_date, DAY), 0)),
+                COALESCE(
+                    TIMESTAMP_DIFF(s.ship_wrk_comp_date, s.first_scan_upload_date, DAY) - COALESCE(oh.total_hold_days, 0),
+                    TIMESTAMP_DIFF(sd.peer_review_date, s.first_scan_upload_date, DAY) - COALESCE(oh.total_hold_days, 0)
+                )
+            ))
+            ELSE NULL END as digital_lt,
+        COALESCE(vf.onHoldComment, f.onHoldComment) as oh_note,
+        cn.last_case_note, cn.last_case_note_author, cn.last_case_note_date,
+        cn.last_internal_case_note, cn.last_internal_case_note_author, cn.last_internal_case_note_date,
+        cn.last_design_case_note, cn.last_design_case_note_author, cn.last_design_case_note_date"""
+
 def volume_where_clause(args):
     """Build WHERE clause for volume using raw Case table columns.
     No phase filter — includes COMPLETED cases for accurate volume counting.
@@ -1295,17 +1351,23 @@ def analytics_wip():
 def analytics_cases():
     try:
         args = request.args
-        where = build_where_clause(args)
+        is_volume_pop = args.get('case_population', '').strip().lower() == 'volume'
+        where = volume_where_clause(args) if is_volume_pop else build_where_clause(args)
+        select_fields = volume_case_select_fields() if is_volume_pop else case_select_fields()
+        joins = volume_case_joins_full() if is_volume_pop else case_joins()
+        if is_volume_pop:
+            # Matches the volume chart's own requirement that PSP completion date is set
+            where += " AND sd.first_psp_review_date IS NOT NULL"
         if args.get('milestone_field') and (args.get('date_from') or args.get('date_to')):
             mf = args.get('milestone_field')
             df_filter = date_range_filter(mf, args.get('date_from',''), args.get('date_to',''))
-            query = f"WITH {signoff_cte()}, {on_hold_cte()} SELECT {case_select_fields()} {case_joins()} WHERE {where} AND {df_filter} ORDER BY f.createdAt DESC LIMIT 500"
+            query = f"WITH {signoff_cte()}, {on_hold_cte()} SELECT {select_fields} {joins} WHERE {where} AND {df_filter} ORDER BY f.createdAt DESC LIMIT 500"
         else:
             if args.get('date_from'):
                 where += f" AND f.createdAt >= '{validate_date(args.get('date_from'))}'"
             if args.get('date_to'):
                 where += f" AND f.createdAt <= '{validate_date(args.get('date_to'))} 23:59:59'"
-            query = f"WITH {signoff_cte()}, {on_hold_cte()} SELECT {case_select_fields()} {case_joins()} WHERE {where} ORDER BY f.createdAt DESC LIMIT 500"
+            query = f"WITH {signoff_cte()}, {on_hold_cte()} SELECT {select_fields} {joins} WHERE {where} ORDER BY f.createdAt DESC LIMIT 500"
         df = client.query(query).to_dataframe()
         return jsonify({"cases": format_cases(df), "count": len(df)})
     except Exception as e:

@@ -511,7 +511,7 @@
         <input type="date" class="date-input" id="dateTo"/>
       </div>
       <div class="filter-grid">
-        <div class="ms-wrap">
+        <div class="ms-wrap" style="display:none">
           <div class="ms-label">Product Group</div>
           <button class="ms-btn" onclick="toggleDD('productGroup')"><span class="ms-btn-text" id="lbl-productGroup">All Groups</span><span class="ms-btn-icons"><i class="fa fa-times ms-clear-x" id="clr-productGroup" onclick="clearDD('productGroup',event)"></i><i class="fa fa-chevron-down ms-chevron"></i></span></button>
           <div class="ms-dropdown" id="dd-productGroup"><div class="ms-search"><input placeholder="Search groups..." oninput="filterList('productGroup',this.value)"/></div><div class="ms-list" id="list-productGroup"></div><div class="ms-footer"><span class="ms-count" id="cnt-productGroup">0 selected</span><div class="ms-footer-btns"><button class="ms-clearall" onclick="clearDD('productGroup',event)">Clear</button><button class="ms-selectall" onclick="selectAll('productGroup')">All</button></div></div></div>
@@ -722,73 +722,6 @@
         <div class="logic-caption">Average lead time per period for the selected metric (Total / Seg / Surgeon / Digital Prod), grouped by product. Click a bar to view those cases.</div>
       </div>
     </div>
-    <!-- PROCESS EFFICIENCY + EXCLUSION BREAKDOWN ROW -->
-    <div class="charts-row">
-      <div class="chart-card">
-        <div class="chart-hdr">
-          <div class="chart-title"><i class="fa fa-tachometer-alt" style="color:var(--accent-dark);margin-right:5px"></i>Process Efficiency</div><button class="copy-btn" onclick="copyChart('effChart','Process Efficiency',event)"><i class="fa fa-copy"></i> Copy</button><button class="chart-settings-btn" id="settingsBtn_effChart" onclick="toggleChartSettings('effChart',event)"><i class="fa fa-sliders-h"></i> Settings</button>
-          <div class="chart-controls">
-            <button class="chart-toggle active" id="effByUserBtn" onclick="setEffView('bar',this)">By User</button>
-            <button class="chart-toggle" id="effTrendBtn" onclick="setEffView('trend',this)">Trend</button>
-            <button class="chart-toggle active" id="effDailyBtn" onclick="setEffGranularity('daily',this)">Daily</button>
-            <button class="chart-toggle" id="effWeeklyBtn" onclick="setEffGranularity('weekly',this)">Weekly</button>
-            <button class="chart-toggle" id="effMonthlyBtn" onclick="setEffGranularity('monthly',this)">Monthly</button>
-            <button class="chart-update-btn" onclick="loadEfficiency()"><i class="fa fa-sync-alt"></i> Update</button>
-          </div>
-        </div>
-        <div class="chart-settings-panel" id="settingsPanel_effChart">
-          <div class="cs-field"><label>Type</label><select id="cs_type_effChart" onchange="onCsTypeChange('effChart')"><option value="bar" selected>Bar</option><option value="line">Line</option></select></div>
-          <div class="cs-field"><label>Color</label><input type="color" id="cs_color_effChart" value="#005F72"/></div>
-          <div class="cs-field" id="cs_barwidth_wrap_effChart"><label>Bar Width <span id="cs_barwidth_val_effChart">70</span>%</label><input type="range" id="cs_barwidth_effChart" min="10" max="100" value="70" oninput="document.getElementById('cs_barwidth_val_effChart').textContent=this.value"/></div>
-          <div class="cs-field"><label>Data Label Size</label><input type="number" id="cs_dlsize_effChart" value="12" min="6" max="24" style="width:60px"/></div>
-          <div class="cs-field"><label>Tick Size</label><input type="number" id="cs_ticksize_effChart" value="12" min="6" max="24" style="width:60px"/></div>
-          <div class="cs-field"><label>Y Min</label><input type="number" id="cs_ymin_effChart" placeholder="auto" style="width:70px"/></div>
-          <div class="cs-field"><label>Y Max</label><input type="number" id="cs_ymax_effChart" placeholder="auto" style="width:70px"/></div>
-          <div class="cs-field"><label>Show Labels</label><input type="checkbox" id="cs_showlabels_effChart" checked/></div>
-          <div class="cs-field"><label>Show Legend</label><input type="checkbox" id="cs_showlegend_effChart"/></div>
-          <button class="cs-apply-btn" onclick="applyChartSettings('effChart')"><i class="fa fa-check"></i> Apply</button>
-          <button class="cs-reset-btn" onclick="resetChartSettings('effChart')"><i class="fa fa-undo"></i> Reset</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border)">
-          <div><span style="font-size:11px;color:var(--text-3)">Team Avg</span><div style="font-size:20px;font-weight:700;color:var(--accent-dark)" id="eff-team-avg">—</div><span style="font-size:10px;color:var(--text-4)" id="eff-team-sub">Click Update</span></div>
-        </div>
-        <div class="chart-empty" id="effChartEmpty"><i class="fa fa-tachometer-alt"></i><p>Click Update to load chart</p></div>
-        <div class="chart-wrap" id="effChartWrap"><canvas id="effChart"></canvas></div>
-        <div class="logic-caption">Standard time ÷ actual touch time × 100%. Workers only. Last signoff per step per case. Excludes pairs &lt;2 min (click-throughs) and &gt;8 hr (overnight gaps) — counts in Exclusion Breakdown →</div>
-        <div style="padding:6px 14px;text-align:right"><button class="kpi-fetch-btn" id="effFetchBtn" style="display:none" onclick="fetchEffCases()"><i class="fa fa-table"></i> Fetch Cases</button></div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-hdr">
-          <div class="chart-title"><i class="fa fa-exclamation-triangle" style="color:var(--orange);margin-right:5px"></i>Exclusion Breakdown</div><button class="copy-btn" onclick="copyChart('exclChart','Exclusion Breakdown',event)"><i class="fa fa-copy"></i> Copy</button><button class="chart-settings-btn" id="settingsBtn_exclChart" onclick="toggleChartSettings('exclChart',event)"><i class="fa fa-sliders-h"></i> Settings</button>
-          <div class="chart-controls">
-            <button class="chart-toggle active" id="exclByUserBtn" onclick="setExclView('user',this)">By User</button>
-            <button class="chart-toggle" id="exclByStepBtn" onclick="setExclView('step',this)">By Step</button>
-            <button class="chart-update-btn" onclick="loadExclusion()"><i class="fa fa-sync-alt"></i> Update</button>
-          </div>
-        </div>
-        <div class="chart-settings-panel" id="settingsPanel_exclChart">
-          <div class="cs-field"><label>Bar Width <span id="cs_barwidth_val_exclChart">70</span>%</label><input type="range" id="cs_barwidth_exclChart" min="10" max="100" value="70" oninput="document.getElementById('cs_barwidth_val_exclChart').textContent=this.value"/></div>
-          <div class="cs-field"><label>Tick Size</label><input type="number" id="cs_ticksize_exclChart" value="12" min="6" max="24" style="width:60px"/></div>
-          <div class="cs-field"><label>Y Max</label><input type="number" id="cs_ymax_exclChart" placeholder="auto" style="width:70px"/></div>
-          <button class="cs-apply-btn" onclick="applyExclSettings()"><i class="fa fa-check"></i> Apply</button>
-          <button class="cs-reset-btn" onclick="resetExclSettings()"><i class="fa fa-undo"></i> Reset</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
-          <div><span style="font-size:11px;color:var(--text-3)">Total Excluded</span><div style="font-size:20px;font-weight:700;color:var(--orange)" id="excl-total">—</div><span style="font-size:10px;color:var(--text-4)" id="excl-sub">Click Update</span></div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-left:4px">
-            <span style="font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:#E05A4E;display:inline-block"></span>Click-through &lt;2min</span>
-            <span style="font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:#d97706;display:inline-block"></span>&gt;200% of standard time</span>
-            <span style="font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:#8aaab5;display:inline-block"></span>No pair found</span>
-          </div>
-        </div>
-        <div class="chart-empty" id="exclChartEmpty"><i class="fa fa-exclamation-triangle"></i><p>Click Update to load chart</p></div>
-        <div class="chart-wrap" id="exclChartWrap"><canvas id="exclChart"></canvas></div>
-        <div class="logic-caption">Signoffs excluded from efficiency calc by reason. High click-throughs = engineers signing off without self-assigning. &gt;200% of standard time = elapsed time was implausibly long or outside acceptable range.</div>
-        <div style="padding:6px 14px;text-align:right"><button class="kpi-fetch-btn" id="exclFetchBtn" style="display:none" onclick="fetchExclCases()"><i class="fa fa-table"></i> Fetch Excluded Cases</button></div>
-      </div>
-    </div>
-    <!-- /PROCESS EFFICIENCY + EXCLUSION BREAKDOWN ROW -->
-
     <!-- UTILIZATION + FPY ROW (mirrors Volume + LT layout) -->
     <div class="charts-row">
       <div class="chart-card">
@@ -858,6 +791,73 @@
         <div style="padding:6px 14px;text-align:right"><button class="kpi-fetch-btn" id="fpyFetchBtn" style="display:none" onclick="fetchFpyCases()"><i class="fa fa-table"></i> Fetch Failed Cases</button></div>
       </div>
     </div>
+
+    <!-- PROCESS EFFICIENCY + EXCLUSION BREAKDOWN ROW -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-hdr">
+          <div class="chart-title"><i class="fa fa-tachometer-alt" style="color:var(--accent-dark);margin-right:5px"></i>Process Efficiency</div><button class="copy-btn" onclick="copyChart('effChart','Process Efficiency',event)"><i class="fa fa-copy"></i> Copy</button><button class="chart-settings-btn" id="settingsBtn_effChart" onclick="toggleChartSettings('effChart',event)"><i class="fa fa-sliders-h"></i> Settings</button>
+          <div class="chart-controls">
+            <button class="chart-toggle active" id="effByUserBtn" onclick="setEffView('bar',this)">By User</button>
+            <button class="chart-toggle" id="effTrendBtn" onclick="setEffView('trend',this)">Trend</button>
+            <button class="chart-toggle active" id="effDailyBtn" onclick="setEffGranularity('daily',this)">Daily</button>
+            <button class="chart-toggle" id="effWeeklyBtn" onclick="setEffGranularity('weekly',this)">Weekly</button>
+            <button class="chart-toggle" id="effMonthlyBtn" onclick="setEffGranularity('monthly',this)">Monthly</button>
+            <button class="chart-update-btn" onclick="loadEfficiency()"><i class="fa fa-sync-alt"></i> Update</button>
+          </div>
+        </div>
+        <div class="chart-settings-panel" id="settingsPanel_effChart">
+          <div class="cs-field"><label>Type</label><select id="cs_type_effChart" onchange="onCsTypeChange('effChart')"><option value="bar" selected>Bar</option><option value="line">Line</option></select></div>
+          <div class="cs-field"><label>Color</label><input type="color" id="cs_color_effChart" value="#005F72"/></div>
+          <div class="cs-field" id="cs_barwidth_wrap_effChart"><label>Bar Width <span id="cs_barwidth_val_effChart">70</span>%</label><input type="range" id="cs_barwidth_effChart" min="10" max="100" value="70" oninput="document.getElementById('cs_barwidth_val_effChart').textContent=this.value"/></div>
+          <div class="cs-field"><label>Data Label Size</label><input type="number" id="cs_dlsize_effChart" value="12" min="6" max="24" style="width:60px"/></div>
+          <div class="cs-field"><label>Tick Size</label><input type="number" id="cs_ticksize_effChart" value="12" min="6" max="24" style="width:60px"/></div>
+          <div class="cs-field"><label>Y Min</label><input type="number" id="cs_ymin_effChart" placeholder="auto" style="width:70px"/></div>
+          <div class="cs-field"><label>Y Max</label><input type="number" id="cs_ymax_effChart" placeholder="auto" style="width:70px"/></div>
+          <div class="cs-field"><label>Show Labels</label><input type="checkbox" id="cs_showlabels_effChart" checked/></div>
+          <div class="cs-field"><label>Show Legend</label><input type="checkbox" id="cs_showlegend_effChart"/></div>
+          <button class="cs-apply-btn" onclick="applyChartSettings('effChart')"><i class="fa fa-check"></i> Apply</button>
+          <button class="cs-reset-btn" onclick="resetChartSettings('effChart')"><i class="fa fa-undo"></i> Reset</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border)">
+          <div><span style="font-size:11px;color:var(--text-3)">Team Avg</span><div style="font-size:20px;font-weight:700;color:var(--accent-dark)" id="eff-team-avg">—</div><span style="font-size:10px;color:var(--text-4)" id="eff-team-sub">Click Update</span></div>
+        </div>
+        <div class="chart-empty" id="effChartEmpty"><i class="fa fa-tachometer-alt"></i><p>Click Update to load chart</p></div>
+        <div class="chart-wrap" id="effChartWrap"><canvas id="effChart"></canvas></div>
+        <div class="logic-caption">Standard time ÷ actual touch time × 100%. Workers only. Last signoff per step per case. Excludes pairs &lt;2 min (click-throughs) and &gt;8 hr (overnight gaps) — counts in Exclusion Breakdown →</div>
+        <div style="padding:6px 14px;text-align:right"><button class="kpi-fetch-btn" id="effFetchBtn" style="display:none" onclick="fetchEffCases()"><i class="fa fa-table"></i> Fetch Cases</button></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-hdr">
+          <div class="chart-title"><i class="fa fa-exclamation-triangle" style="color:var(--orange);margin-right:5px"></i>Exclusion Breakdown</div><button class="copy-btn" onclick="copyChart('exclChart','Exclusion Breakdown',event)"><i class="fa fa-copy"></i> Copy</button><button class="chart-settings-btn" id="settingsBtn_exclChart" onclick="toggleChartSettings('exclChart',event)"><i class="fa fa-sliders-h"></i> Settings</button>
+          <div class="chart-controls">
+            <button class="chart-toggle active" id="exclByUserBtn" onclick="setExclView('user',this)">By User</button>
+            <button class="chart-toggle" id="exclByStepBtn" onclick="setExclView('step',this)">By Step</button>
+            <button class="chart-update-btn" onclick="loadExclusion()"><i class="fa fa-sync-alt"></i> Update</button>
+          </div>
+        </div>
+        <div class="chart-settings-panel" id="settingsPanel_exclChart">
+          <div class="cs-field"><label>Bar Width <span id="cs_barwidth_val_exclChart">70</span>%</label><input type="range" id="cs_barwidth_exclChart" min="10" max="100" value="70" oninput="document.getElementById('cs_barwidth_val_exclChart').textContent=this.value"/></div>
+          <div class="cs-field"><label>Tick Size</label><input type="number" id="cs_ticksize_exclChart" value="12" min="6" max="24" style="width:60px"/></div>
+          <div class="cs-field"><label>Y Max</label><input type="number" id="cs_ymax_exclChart" placeholder="auto" style="width:70px"/></div>
+          <button class="cs-apply-btn" onclick="applyExclSettings()"><i class="fa fa-check"></i> Apply</button>
+          <button class="cs-reset-btn" onclick="resetExclSettings()"><i class="fa fa-undo"></i> Reset</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <div><span style="font-size:11px;color:var(--text-3)">Total Excluded</span><div style="font-size:20px;font-weight:700;color:var(--orange)" id="excl-total">—</div><span style="font-size:10px;color:var(--text-4)" id="excl-sub">Click Update</span></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-left:4px">
+            <span style="font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:#E05A4E;display:inline-block"></span>Click-through &lt;2min</span>
+            <span style="font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:#d97706;display:inline-block"></span>&gt;200% of standard time</span>
+            <span style="font-size:10px;color:var(--text-3);display:flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:2px;background:#8aaab5;display:inline-block"></span>No pair found</span>
+          </div>
+        </div>
+        <div class="chart-empty" id="exclChartEmpty"><i class="fa fa-exclamation-triangle"></i><p>Click Update to load chart</p></div>
+        <div class="chart-wrap" id="exclChartWrap"><canvas id="exclChart"></canvas></div>
+        <div class="logic-caption">Signoffs excluded from efficiency calc by reason. High click-throughs = engineers signing off without self-assigning. &gt;200% of standard time = elapsed time was implausibly long or outside acceptable range.</div>
+        <div style="padding:6px 14px;text-align:right"><button class="kpi-fetch-btn" id="exclFetchBtn" style="display:none" onclick="fetchExclCases()"><i class="fa fa-table"></i> Fetch Excluded Cases</button></div>
+      </div>
+    </div>
+    <!-- /PROCESS EFFICIENCY + EXCLUSION BREAKDOWN ROW -->
     </div><!-- /r3idDashboardBody -->
 
     <!-- CASE LIST — third section, always visible, outside R3ID and CamStar -->
@@ -2599,7 +2599,7 @@ function setLtGranularity(g,el){ltGranularity=g;ltDrillPeriod=null;document.getE
 function volDrillUp(){volDrillPeriod=null;volGranularity='monthly';document.getElementById('volDrillUpBtn').classList.remove('show');document.getElementById('volMonthlyBtn').classList.add('active');document.getElementById('volWeeklyBtn').classList.remove('active');refreshVolChart();}
 function ltDrillUp(){ltDrillPeriod=null;ltGranularity='monthly';document.getElementById('ltDrillUpBtn').classList.remove('show');document.getElementById('ltMonthlyBtn').classList.add('active');document.getElementById('ltWeeklyBtn').classList.remove('active');refreshLtChart();}
 function toggleChartOutlier(chart){if(chart==='vol'){volExcludeOutliers=!volExcludeOutliers;const btn=document.getElementById('volOutlierBtn');btn.classList.toggle('outlier-on',volExcludeOutliers);btn.textContent=volExcludeOutliers?'Incl. Outliers':'Excl. Outliers';}else{ltExcludeOutliers=!ltExcludeOutliers;const btn=document.getElementById('ltOutlierBtn');btn.classList.toggle('outlier-on',ltExcludeOutliers);btn.textContent=ltExcludeOutliers?'Incl. Outliers':'Excl. Outliers';}}
-async function fetchCasesForBar(period,product,metric,granularity){const milestoneMap={volume:'sd.first_psp_review_date',total_lt:'s.ship_wrk_comp_date',seg_lt:'sd.seg_review_date',surgeon_lt:'sd.surgeon_approval_date',digital_lt:'sd.first_psp_review_date'};const d=new Date(period);let from,to;if(granularity==='monthly'){from=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];to=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];}else{from=period;const end=new Date(d);end.setDate(end.getDate()+6);to=end.toISOString().split('T')[0];}showLoading(`Fetching ${product}...`);isOnHoldTable=false;try{const mf=milestoneMap[metric]||'sd.first_psp_review_date';const qs=buildQS({product,date_from:from,date_to:to,milestone_field:mf});const res=await fetch(`${API}/analytics/cases?${qs}`);const data=res.ok?await res.json():null;if(data?.cases)loadCasesIntoTable(data.cases,`${product} - ${period}`,`${data.count} cases - ${from} to ${to}`,false);}catch(e){toast('Error','err');}finally{hideLoading();}}
+async function fetchCasesForBar(period,product,metric,granularity){const milestoneMap={volume:'sd.first_psp_review_date',total_lt:'s.ship_wrk_comp_date',seg_lt:'sd.seg_review_date',surgeon_lt:'sd.surgeon_approval_date',digital_lt:'sd.first_psp_review_date'};const d=new Date(period);let from,to;if(granularity==='monthly'){from=new Date(d.getFullYear(),d.getMonth(),1).toISOString().split('T')[0];to=new Date(d.getFullYear(),d.getMonth()+1,0).toISOString().split('T')[0];}else{from=period;const end=new Date(d);end.setDate(end.getDate()+6);to=end.toISOString().split('T')[0];}showLoading(`Fetching ${product}...`);isOnHoldTable=false;try{const mf=milestoneMap[metric]||'sd.first_psp_review_date';const extras={product,date_from:from,date_to:to,milestone_field:mf};if(metric==='volume')extras.case_population='volume';const qs=buildQS(extras);const res=await fetch(`${API}/analytics/cases?${qs}`);const data=res.ok?await res.json():null;if(data?.cases)loadCasesIntoTable(data.cases,`${product} - ${period}`,`${data.count} cases - ${from} to ${to}`,false);}catch(e){toast('Error','err');}finally{hideLoading();}}
 
 // ── PER-CARD CALCULATE ──
 // calcKpi fires only for one specific card, fully independent
