@@ -16,6 +16,7 @@
     .sidebar{width:var(--sidebar-w);background:#fff;border-right:1px solid var(--border);position:fixed;top:0;left:0;height:100vh;overflow-y:auto;z-index:100;display:flex;flex-direction:column;transition:width .2s ease}
     /* Collapsed sidebar — icon only */
     body.sidebar-collapsed .sidebar{width:48px}
+    body.sidebar-collapsed .sidebar .sb-logo{display:none}
     body.sidebar-collapsed .sb-section,
     body.sidebar-collapsed .sb-logo img,
     body.sidebar-collapsed .sb-logo-fallback,
@@ -461,7 +462,7 @@
   </div>
   <div class="sb-section">Dashboard</div>
   <nav><ul>
-    <li><a href="https://restor3dindia.netlify.app/"><i class="fa fa-home"></i>Dashboard</a></li>
+    <li><a href="https://restor3dindia.netlify.app/"><i class="fa fa-home"></i><span>Dashboard</span></a></li>
   </ul></nav>
   <div class="sb-collapse-btn" onclick="toggleSidebar()" title="Collapse sidebar">
     <i class="fa fa-chevron-left" id="sbCollapseIcon"></i>
@@ -4166,14 +4167,16 @@ function toggleSidebar(){
   const collapsed = document.body.classList.toggle('sidebar-collapsed');
   const icon = document.getElementById('sbCollapseIcon');
   if(icon) icon.className = collapsed ? 'fa fa-chevron-right' : 'fa fa-chevron-left';
-  localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '');
+  localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
 }
 (function(){
-  if(localStorage.getItem('sidebarCollapsed')){
+  const pref = localStorage.getItem('sidebarCollapsed');
+  const collapsed = pref === null ? true : pref === '1'; // default to collapsed
+  if(collapsed){
     document.body.classList.add('sidebar-collapsed');
-    const icon = document.getElementById('sbCollapseIcon');
-    if(icon) icon.className = 'fa fa-chevron-right';
   }
+  const icon = document.getElementById('sbCollapseIcon');
+  if(icon) icon.className = collapsed ? 'fa fa-chevron-right' : 'fa fa-chevron-left';
 })();
 
 // ── Chart selector helpers ──
