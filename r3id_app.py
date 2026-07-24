@@ -1001,6 +1001,7 @@ def forecast():
         date_to   = args.get('date_to', '').strip()
         product   = args.get('product', '').strip()
         product_group = args.get('product_group', '').strip()
+        case_type = args.get('case_type', '').strip()
         source    = args.get('source', 'both')  # 'bigquery', 'camstar', or 'both'
 
         # Determine which forecast buckets to sum.
@@ -1023,6 +1024,14 @@ def forecast():
                 for p in CAMSTAR_PRODUCT_GROUPS.get(g, []):
                     if p in forecast_targets and p not in buckets:
                         buckets.append(p)
+        elif case_type:
+            # Case type wasn't matched at all before — any case_type-only filter
+            # (with no product/product_group set) fell through to the "sum every
+            # bucket" branch below, which is what produced the inflated RTSA line.
+            types = [t.strip() for t in case_type.split(',')]
+            for t in types:
+                if t in forecast_targets:
+                    buckets.append(t)
         else:
             buckets = list(forecast_targets.keys())
 
