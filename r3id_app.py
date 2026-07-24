@@ -252,6 +252,18 @@ def forecast_targets_debug():
     except Exception as e:
         return handle_error(request.endpoint, e)
 
+@app.route("/analytics/forecast-buckets", methods=["GET"])
+def forecast_buckets():
+    """Just the list of available forecast bucket names (sorted), for
+    populating the Volume chart's forecast-product selector — lighter than
+    /analytics/forecast-targets, which also returns all 12 months of data."""
+    try:
+        force_refresh = request.args.get("refresh", "").lower() == "true"
+        targets = get_forecast_targets(force_refresh=force_refresh)
+        return jsonify({"buckets": sorted(targets.keys())})
+    except Exception as e:
+        return handle_error(request.endpoint, e)
+
 CAMSTAR_PRODUCT_GROUPS = {
     'Cleared Knee': ['Identity CR','Identity CR Dragon','Identity PS','Imprint','Stryker (Triathlon)',
                      'iTotal (G2) CR','iTotal (G2) PS','iUni','PKR','iDuo'],

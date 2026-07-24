@@ -535,6 +535,12 @@
           </div>
           <button class="kpi-calc-btn" style="height:30px;width:auto;padding:0 10px;margin:0" id="loadStepsBtn" onclick="loadSteps()"><i class="fa fa-sync"></i> Load</button>
         </div>
+        <div class="ms-wrap">
+          <div class="ms-label">Group <span style="font-weight:400;color:var(--text-4);font-size:9px">(auto-selects matching users below)</span></div>
+          <select id="groupSelect" onchange="onGroupSelect(this.value)" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg-input);color:var(--text-1)">
+            <option value="">— Select a group —</option>
+          </select>
+        </div>
         <div class="ms-wrap" style="display:flex;gap:6px;align-items:flex-end">
           <div style="flex:1">
             <div class="ms-label">User</div>
@@ -680,6 +686,12 @@
           <div class="cs-field"><label>Y Max</label><input type="number" id="cs_ymax_volChart" placeholder="auto" style="width:70px"/></div>
           <div class="cs-field"><label>Show Labels</label><input type="checkbox" id="cs_showlabels_volChart" checked/></div>
           <div class="cs-field"><label>Show Legend</label><input type="checkbox" id="cs_showlegend_volChart"/></div>
+          <div class="cs-field" style="flex-direction:column;align-items:flex-start">
+            <label>Forecast Products <span style="font-weight:400;color:var(--text-4);font-size:9px">(none selected = no forecast line)</span></label>
+            <div id="volForecastBucketList" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:6px;width:100%;font-size:11px;background:var(--bg-input)">
+              <div style="color:var(--text-4)">Loading...</div>
+            </div>
+          </div>
           <button class="cs-apply-btn" onclick="applyChartSettings('volChart')"><i class="fa fa-check"></i> Apply</button>
           <button class="cs-reset-btn" onclick="resetChartSettings('volChart')"><i class="fa fa-undo"></i> Reset</button>
         </div>
@@ -993,6 +1005,39 @@ async function loadSteps(){
     }
   }catch(e){toast('Error loading steps','err');}
   finally{btn.disabled=false;btn.innerHTML='<i class="fa fa-sync"></i> Load';}
+}
+
+let USER_GROUPS_LIVE = {};
+
+async function loadUserGroups(){
+  try{
+    const res = await fetch(`${API}/analytics/user-groups`);
+    USER_GROUPS_LIVE = await res.json();
+    const sel = document.getElementById('groupSelect');
+    if(!sel) return;
+    const teams = Object.keys(USER_GROUPS_LIVE.bigquery || {}).sort();
+    sel.innerHTML = '<option value="">— Select a group —</option>' +
+      teams.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  }catch(e){ console.error('loadUserGroups error', e); }
+}
+
+async function onGroupSelect(teamName){
+  if(!teamName) return;
+  // If users haven't been loaded yet, load them first so there's something to check.
+  if(!document.querySelectorAll('#list-stepUser input[type=checkbox]').length){
+    await loadUsers();
+  }
+  clearDD('stepUser', null); // start clean — group selection replaces, not adds to, the current user selection
+  const members = (USER_GROUPS_LIVE.bigquery || {})[teamName] || [];
+  document.getElementById('list-stepUser')?.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    if(members.includes(cb.value)){
+      cb.checked = true;
+      onCheck('stepUser', cb.value, true);
+    }
+  });
+  if(!members.length){
+    toast(`No known users in "${teamName}" yet`, 'info');
+  }
 }
 
 async function loadUsers(){
@@ -1946,6 +1991,19 @@ function applyChartSettings(cid){
   } : {display:false};
 
   inst.update('none');
+
+  // Forecast Products selection only exists on the Volume chart's settings
+  // panel — read the checked buckets, persist, and if the selection
+  // actually changed, do a real refresh (this needs new forecast data,
+  // unlike the style-only changes above which just restyle in place).
+  if(cid === 'volChart'){
+    const checked = Array.from(document.querySelectorAll('.vol-forecast-bucket-cb:checked')).map(cb => cb.value);
+    const changed = JSON.stringify(checked.sort()) !== JSON.stringify([...volForecastBuckets].sort());
+    volForecastBuckets = checked;
+    localStorage.setItem('volForecastBuckets', JSON.stringify(volForecastBuckets));
+    if(changed){ refreshVolChart(); return; } // refreshVolChart already toasts on completion
+  }
+
   toast('Chart updated','ok');
 }
 
@@ -2211,11 +2269,40 @@ const _origOnProductGroupChange = window.onProductGroupChange;
 
 // ── FORECAST OVERLAY ──
 let lastForecastData = null;
+let volForecastBuckets = JSON.parse(localStorage.getItem('volForecastBuckets') || '[]');
+
+async function loadForecastBuckets(){
+  try{
+    const res = await fetch(`${API}/analytics/forecast-buckets`);
+    const data = await res.json();
+    const container = document.getElementById('volForecastBucketList');
+    if(!container) return;
+    container.innerHTML = (data.buckets||[]).map(b => `
+      <label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer">
+        <input type="checkbox" class="vol-forecast-bucket-cb" value="${esc(b)}" ${volForecastBuckets.includes(b) ? 'checked' : ''}/>
+        <span>${esc(b)}</span>
+      </label>
+    `).join('') || '<div style="color:var(--text-4)">No forecast buckets available</div>';
+  }catch(e){ console.error('loadForecastBuckets error', e); }
+}
 
 async function fetchForecast(granularity){
+  if(!volForecastBuckets.length){ lastForecastData = null; return null; } // none selected = no forecast line
   try{
-    const qs = buildQS({granularity: granularity || 'monthly'});
-    const res = await fetch(`${API}/analytics/forecast?${qs}`);
+    // Deliberately NOT using buildQS() here — this selector must stay fully
+    // independent of the general Product/Product Group filters, and buildQS's
+    // extras are appended (not set), so a general product filter could
+    // otherwise silently win over this selection on the backend.
+    const params = new URLSearchParams();
+    params.append('granularity', granularity || 'monthly');
+    params.append('product', volForecastBuckets.join(','));
+    if(!isAllTime){
+      const from = document.getElementById('dateFrom').value || dateFrom;
+      const to = document.getElementById('dateTo').value || dateTo;
+      if(from) params.append('date_from', from);
+      if(to) params.append('date_to', to);
+    }
+    const res = await fetch(`${API}/analytics/forecast?${params.toString()}`);
     const data = await res.json();
     lastForecastData = data;
     return data;
@@ -2280,6 +2367,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
   applyInitialCollapseState();
   handleR3idDateSelect('180');
   loadCaseTypes();
+  loadForecastBuckets();
+  loadUserGroups();
   document.addEventListener('click',e=>{
     document.querySelectorAll('.ms-dropdown.open').forEach(dd=>{if(!dd.closest('.ms-wrap').contains(e.target)){dd.classList.remove('open');dd.previousElementSibling.classList.remove('open');}});
     document.querySelectorAll('.col-filter-dropdown.open').forEach(dd=>{if(!dd.closest('.col-filter-wrap').contains(e.target))dd.classList.remove('open');});
