@@ -1116,8 +1116,8 @@ function renderUtilChart(data){
     });
   } else {
     // By user bar chart
-    const users=(data.users||[]).filter(u=>u.utilization>=10);
-    if(!users.length){wrap.innerHTML='<div class="chart-empty"><p>No users with utilization ≥ 10%</p></div><button class="copy-btn" onclick="copyChart(\'utilChart\',\'Utilization\',event)"><i class="fa fa-copy"></i> Copy</button>';return;}
+    const users=(data.users||[]);
+    if(!users.length){wrap.innerHTML='<div class="chart-empty"><p>No signoff data for the selected filters</p></div><button class="copy-btn" onclick="copyChart(\'utilChart\',\'Utilization\',event)"><i class="fa fa-copy"></i> Copy</button>';return;}
     const labels=users.map(u=>u.userId);
     const vals=users.map(u=>u.utilization);
     const colors=vals.map(v=>v>=80?'#16a34a':v>=50?'#d97706':'#E05A4E');
