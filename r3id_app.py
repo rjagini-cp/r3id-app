@@ -502,7 +502,9 @@ def get_design_time(step_name, user_type, product, multiplier=1):
     SCAN_TIMES/SEG_TIMES/STEP_TIMES dicts only if the live sheet is unreachable.
     """
     live = get_design_times_live()
-    if live is not None:
+    if live:  # non-empty dict — use live data. Falls through to hardcoded
+              # tables below if live is None (fetch failed) OR {} (fetch
+              # succeeded but zero rows matched, e.g. a column-name mismatch).
         design_min, review_min = live.get((product, step_name), (None, None))
         base = design_min if user_type == 'WORKER' else review_min
         if base is None:
