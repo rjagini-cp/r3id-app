@@ -252,18 +252,6 @@ def forecast_targets_debug():
     except Exception as e:
         return handle_error(request.endpoint, e)
 
-@app.route("/analytics/forecast-buckets", methods=["GET"])
-def forecast_buckets():
-    """Just the list of available forecast bucket names (sorted), for
-    populating the Volume chart's forecast-product selector — lighter than
-    /analytics/forecast-targets, which also returns all 12 months of data."""
-    try:
-        force_refresh = request.args.get("refresh", "").lower() == "true"
-        targets = get_forecast_targets(force_refresh=force_refresh)
-        return jsonify({"buckets": sorted(targets.keys())})
-    except Exception as e:
-        return handle_error(request.endpoint, e)
-
 CAMSTAR_PRODUCT_GROUPS = {
     'Cleared Knee': ['Identity CR','Identity CR Dragon','Identity PS','Imprint','Stryker (Triathlon)',
                      'iTotal (G2) CR','iTotal (G2) PS','iUni','PKR','iDuo'],
@@ -1021,7 +1009,14 @@ def forecast():
         # case_type_name (specific case type) — matched directly, no grouping dicts.
         forecast_targets = get_forecast_targets()
         buckets = []
-        if product:
+        if case_type:
+            # Most specific filter — check first so a still-active product filter
+            # doesn't silently override a more granular case-type selection.
+            types = [t.strip() for t in case_type.split(',')]
+            for t in types:
+                if t in forecast_targets:
+                    buckets.append(t)
+        elif product:
             prods = [p.strip() for p in product.split(',')]
             for p in prods:
                 if p in forecast_targets:
@@ -1036,14 +1031,6 @@ def forecast():
                 for p in CAMSTAR_PRODUCT_GROUPS.get(g, []):
                     if p in forecast_targets and p not in buckets:
                         buckets.append(p)
-        elif case_type:
-            # Case type wasn't matched at all before — any case_type-only filter
-            # (with no product/product_group set) fell through to the "sum every
-            # bucket" branch below, which is what produced the inflated RTSA line.
-            types = [t.strip() for t in case_type.split(',')]
-            for t in types:
-                if t in forecast_targets:
-                    buckets.append(t)
         else:
             buckets = list(forecast_targets.keys())
 
@@ -1569,8 +1556,7 @@ def utilization():
             if all_prods:
                 joined = "','".join(all_prods)
                 case_conditions.append(f"cc.name IN ('{joined}')")
-        else:
-            case_conditions.append("cc.name IN ('Reverse Total Shoulder Arthroplasty','Total Ankle Replacement')")
+        # else: no filter selected — no cc.name restriction (all products included)
         case_where = " AND ".join(case_conditions)
 
         # Signoff conditions — ACCEPT only for workers, but include all for active day counting
@@ -1601,7 +1587,7 @@ def utilization():
 
         # Period grouping
         if granularity == 'daily':
-            period_expr = ist_date
+            period_expr = f"FORMAT_DATE('%Y-%m-%d', {ist_date})"
         elif granularity == 'monthly':
             period_expr = f"FORMAT_DATE('%Y-%m', {ist_date})"
         else:  # weekly
@@ -1754,8 +1740,7 @@ def _eff_case_where(args):
         if all_prods:
             joined = "','".join(all_prods)
             conds.append("cc.name IN ('" + joined + "')")
-    else:
-        conds.append("cc.name IN ('Reverse Total Shoulder Arthroplasty','Total Ankle Replacement')")
+    # else: no filter selected — no cc.name restriction (all products included)
     return " AND ".join(conds)
 
 def _eff_date_filter(args, ts_expr):
@@ -1938,7 +1923,7 @@ def process_efficiency():
         granularity = args.get('granularity','daily')
         ist_sig = "TIMESTAMP_ADD(end_time, INTERVAL 330 MINUTE)"
         if granularity == 'daily':
-            period_expr = f"DATE({ist_sig})"
+            period_expr = f"FORMAT_DATE('%Y-%m-%d', {ist_sig})"
         elif granularity == 'monthly':
             period_expr = f"FORMAT_DATE('%Y-%m', {ist_sig})"
         else:
@@ -2171,8 +2156,7 @@ def first_pass_yield():
             if all_prods:
                 joined = "','".join(all_prods)
                 case_conditions.append(f"cc.name IN ('{joined}')")
-        else:
-            case_conditions.append("cc.name IN ('Reverse Total Shoulder Arthroplasty','Total Ankle Replacement')")
+        # else: no filter selected — no cc.name restriction (all products included)
         case_where = " AND ".join(case_conditions)
 
         # Date filter on REVIEWER accept date (UTC) — matches Power BI slicer behaviour
@@ -2187,7 +2171,7 @@ def first_pass_yield():
 
         # Period grouping — use reviewer date for period bucketing
         if granularity == 'daily':
-            period_expr = rev_date
+            period_expr = f"FORMAT_DATE('%Y-%m-%d', {rev_date})"
         elif granularity == 'monthly':
             period_expr = f"FORMAT_DATE('%Y-%m', {rev_date})"
         else:
