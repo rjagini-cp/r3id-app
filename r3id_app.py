@@ -531,10 +531,15 @@ def get_design_time(step_name, user_type, product, multiplier=1):
     return None
 
 def get_case_time_multiplier(laterality, preoperative_state, proposed_indication, design_notes):
-    """Bilateral case -> 2x, revision case -> 2x, both -> 4x, neither -> 1x.
+    """Bilateral case -> 2x, revision case -> 1x (disabled, see note below), neither -> 1x.
     Revision = preoperativeState == 'REVISION_OTHER_SYSTEM' OR the word "revision"
     appears in proposedIndication or designNotes (case-insensitive).
     Applies to all BigQuery case types (not Camstar — this data doesn't exist there).
+
+    NOTE: revision multiplier intentionally disabled (2 -> 1) per decision on
+    2026-08-XX — is_revision is still computed/detected above for traceability,
+    it just no longer affects the multiplier. Change the '1' back to '2' below
+    to re-enable.
     """
     is_bilateral = (laterality or '').strip().upper() == 'BILATERAL'
     is_revision = (
@@ -546,7 +551,7 @@ def get_case_time_multiplier(laterality, preoperative_state, proposed_indication
     if is_bilateral:
         m *= 2
     if is_revision:
-        m *= 2
+        m *= 1  # disabled — was 2
     return m
 
 METRIC_MAP = {
