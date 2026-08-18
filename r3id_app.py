@@ -1361,7 +1361,68 @@ def analytics_wip():
 def analytics_cases():
     try:
         args = request.args
-        is_volume_pop = args.get('case_population', '').strip().lower() == 'volume'
+        case_population = args.get('case_population', '').strip().lower()
+        is_volume_pop = case_population == 'volume'
+        step_val_check = args.get('step', '').strip()
+        user_val_check = args.get('step_user', '').strip()
+        # Auto-detect: this is one of the chart-specific "Fetch Cases" buttons
+        # (Utilization/Process-Efficiency/FPY — the only callers that send
+        # fetch_cases=true) with both step + user set and no milestone_field.
+        # Filtering that combination by case creation date never made sense —
+        # route it through the signoff-anchored logic automatically instead.
+        # Deliberately excludes the general "Fetch All Cases" button, which
+        # never sends fetch_cases=true and keeps its documented
+        # created-in-date-range behavior.
+        is_util_pop = (
+            case_population == 'utilization'
+            or (
+                args.get('fetch_cases', '').strip().lower() == 'true'
+                and step_val_check and user_val_check
+                and not args.get('milestone_field')
+            )
+        )
+
+        if is_util_pop:
+            # Cases where the selected user(s) did the selected step, filtered on
+            # the signoff's own IST date — matches exactly how /analytics/utilization
+            # computes earned minutes for the same filters. Using the raw Case table
+            # (not vw_fact_case) since utilization does the same, for consistency.
+            step_val = args.get('step', '').strip()
+            user_val = args.get('step_user', '').strip()
+            role_val = (args.get('user_role', '') or 'WORKER').strip().upper()
+            if role_val not in ('WORKER', 'REVIEWER', 'APPROVER'):
+                role_val = 'WORKER'
+            ist_date = "DATE(TIMESTAMP_ADD(CAST(w_flt.createdAt AS TIMESTAMP), INTERVAL 330 MINUTE))"
+            sub = ["w_flt.deleted = false", "w_flt.workModuleSignatureType = 'ACCEPT'",
+                   f"w_flt.workModuleUserType = '{role_val}'"]
+            if step_val:
+                steps = [s.strip() for s in step_val.split(',')]
+                joined = "','".join(steps)
+                sub.append(f"wm_flt.name IN ('{joined}')" if len(steps) > 1 else f"wm_flt.name = '{steps[0]}'")
+            if user_val:
+                users = [u.strip() for u in user_val.split(',')]
+                joined = "','".join(users)
+                sub.append(f"w_flt.signature IN ('{joined}')" if len(users) > 1 else f"w_flt.signature = '{users[0]}'")
+            date_from = validate_date(args.get('date_from', ''))
+            date_to = validate_date(args.get('date_to', ''))
+            if date_from:
+                sub.append(f"{ist_date} >= '{date_from}'")
+            if date_to:
+                sub.append(f"{ist_date} <= '{date_to}'")
+            sub_where = " AND ".join(sub)
+            where = f"""f.deleted = false AND f.canceled = false AND f.id IN (
+                SELECT DISTINCT w_flt.caseId
+                FROM {tbl('WorkModuleSignoff')} w_flt
+                LEFT JOIN {tbl('WorkModuleInstance')} wi_flt ON w_flt.workModuleInstanceId = wi_flt.id
+                LEFT JOIN {tbl('WorkModule')} wm_flt ON wi_flt.workModuleId = wm_flt.id
+                WHERE {sub_where}
+            )"""
+            select_fields = volume_case_select_fields()
+            joins = volume_case_joins_full()
+            query = f"WITH {signoff_cte()}, {on_hold_cte()} SELECT {select_fields} {joins} WHERE {where} ORDER BY f.createdAt DESC LIMIT 500"
+            df = client.query(query).to_dataframe()
+            return jsonify({"cases": format_cases(df), "count": len(df)})
+
         where = volume_where_clause(args) if is_volume_pop else build_where_clause(args)
         select_fields = volume_case_select_fields() if is_volume_pop else case_select_fields()
         joins = volume_case_joins_full() if is_volume_pop else case_joins()
@@ -1380,6 +1441,72 @@ def analytics_cases():
             query = f"WITH {signoff_cte()}, {on_hold_cte()} SELECT {select_fields} {joins} WHERE {where} ORDER BY f.createdAt DESC LIMIT 500"
         df = client.query(query).to_dataframe()
         return jsonify({"cases": format_cases(df), "count": len(df)})
+    except Exception as e:
+        return handle_error(request.endpoint, e)
+
+@app.route("/analytics/user-cases", methods=["GET"])
+def user_cases():
+    """List cases a specific user signed off on for a specific step, filtered by
+    when that signoff actually happened (not case creation date).
+    Query params:
+      user       - name or partial name match against User.nameFirst/nameLast (required)
+      step       - WorkModule step name, e.g. 'Segmentation' (required)
+      role       - 'WORKER' (did the work) or 'REVIEWER' (reviewed it). Default WORKER.
+      date_from  - YYYY-MM-DD, filters on the signoff's own date (IST), inclusive
+      date_to    - YYYY-MM-DD, inclusive
+    """
+    try:
+        args = request.args
+        user_search = args.get('user', '').strip()
+        step = args.get('step', '').strip()
+        role = args.get('role', 'WORKER').strip().upper()
+        date_from = args.get('date_from', '').strip()
+        date_to = args.get('date_to', '').strip()
+        if not user_search or not step:
+            return jsonify({"error": "Both 'user' and 'step' query params are required"}), 400
+        if role not in ('WORKER', 'REVIEWER', 'APPROVER'):
+            role = 'WORKER'
+
+        date_conditions = []
+        if date_from:
+            date_conditions.append(f"DATE(TIMESTAMP_ADD(CAST(w.createdAt AS TIMESTAMP), INTERVAL 330 MINUTE)) >= '{validate_date(date_from)}'")
+        if date_to:
+            date_conditions.append(f"DATE(TIMESTAMP_ADD(CAST(w.createdAt AS TIMESTAMP), INTERVAL 330 MINUTE)) <= '{validate_date(date_to)}'")
+        date_where = (" AND " + " AND ".join(date_conditions)) if date_conditions else ""
+
+        name_parts = [p.strip().replace("'", "") for p in user_search.split() if p.strip()]
+        name_filter = " AND ".join(
+            f"LOWER(w.signature) LIKE '%{p.lower()}%'"
+            for p in name_parts
+        ) or "true"
+
+        query = f"""
+        SELECT
+            c.id AS case_id,
+            c.count AS case_number,
+            cc.name AS product,
+            DATE(TIMESTAMP_ADD(CAST(w.createdAt AS TIMESTAMP), INTERVAL 330 MINUTE)) AS action_date_ist,
+            w.workModuleSignatureType AS action,
+            w.signature AS user_signature
+        FROM {tbl('WorkModuleSignoff')} w
+        JOIN {tbl('WorkModuleInstance')} wi ON w.workModuleInstanceId = wi.id
+        JOIN {tbl('WorkModule')} wm ON wi.workModuleId = wm.id
+        JOIN {tbl('Case')} c ON w.caseId = c.id
+        LEFT JOIN {tbl('CaseCategory')} cc ON c.caseCategoryId = cc.id
+        WHERE w.deleted = false
+            AND wm.name = '{step.replace("'", "")}'
+            AND w.workModuleUserType = '{role}'
+            AND w.workModuleSignatureType = 'ACCEPT'
+            AND {name_filter}
+            {date_where}
+        ORDER BY action_date_ist
+        """
+        df = client.query(query).to_dataframe()
+        return jsonify({
+            "matched_signatures": sorted(df['user_signature'].unique().tolist()) if len(df) else [],
+            "count": len(df),
+            "cases": df.astype(str).to_dict(orient='records')
+        })
     except Exception as e:
         return handle_error(request.endpoint, e)
 
