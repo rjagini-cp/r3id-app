@@ -1235,6 +1235,7 @@ def kpi_or_cases(args, date_field, metric_sql, fetch_cases=False, include_hold_u
                 LEFT JOIN {tbl('CaseType')} ct ON f.caseTypeId = ct.id
                 LEFT JOIN {tbl('vw_lkup_stage_log_dates')} s ON f.id = s.caseId
                 LEFT JOIN signoff_dates sd ON f.id = sd.caseId
+                LEFT JOIN on_hold_time oh ON f.id = oh.caseId
                 WHERE {completed_where} AND {completed_df_filter}
             ),
             combined_ids AS (
