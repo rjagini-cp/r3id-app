@@ -1127,6 +1127,62 @@ def lead_time_views():
     except Exception as e:
         return handle_error(request.endpoint, e)
 
+def completed_case_supplement_where(args):
+    """Narrow where-builder for the COMPLETED-phase supplement in kpi_or_cases().
+    Covers product / product_group / case_type / step+step_user only — the
+    filters actually exposed in the main filter panel. Does NOT attempt to
+    replicate the Advanced Filters (joint/regulatory/surgeon/laterality/
+    facility/state/flags) since those denormalized fields live only on
+    vw_fact_case, which is exactly what this supplement exists to work
+    around. Returns (where_sql, unsupported_filter_names) — if any
+    unsupported filter is active, the caller should skip the supplement
+    entirely rather than silently ignore a filter the person explicitly set.
+    """
+    conditions = ["f.deleted = false", "f.phase = 'COMPLETED'"]
+    product = args.get('product', '').strip()
+    product_group = args.get('product_group', '').strip()
+    if product:
+        prods = [p.strip() for p in product.split(',')]
+        joined = "','".join(prods)
+        conditions.append(f"cc.name IN ('{joined}')" if len(prods) > 1 else f"cc.name = '{prods[0]}'")
+    elif product_group:
+        all_prods = []
+        for g in [g.strip() for g in product_group.split(',')]:
+            all_prods.extend(PRODUCT_GROUPS.get(g, []))
+        if all_prods:
+            joined = "','".join(all_prods)
+            conditions.append(f"cc.name IN ('{joined}')")
+    case_type = args.get('case_type', '').strip()
+    if case_type:
+        types = [t.strip() for t in case_type.split(',')]
+        joined = "','".join(types)
+        conditions.append(f"ct.name IN ('{joined}')" if len(types) > 1 else f"ct.name = '{types[0]}'")
+    step_val = args.get('step', '').strip()
+    user_val = args.get('step_user', '').strip()
+    if step_val or user_val:
+        sub = ["w_flt.deleted = false", "w_flt.workModuleSignatureType = 'ACCEPT'"]
+        if step_val:
+            steps = [s.strip() for s in step_val.split(',')]
+            joined = "','".join(steps)
+            sub.append(f"wm_flt.name IN ('{joined}')" if len(steps) > 1 else f"wm_flt.name = '{steps[0]}'")
+        if user_val:
+            users = [u.strip() for u in user_val.split(',')]
+            joined = "','".join(users)
+            sub.append(f"w_flt.signature IN ('{joined}')" if len(users) > 1 else f"w_flt.signature = '{users[0]}'")
+        sub_where = " AND ".join(sub)
+        conditions.append(f"""f.id IN (
+            SELECT DISTINCT w_flt.caseId
+            FROM {tbl('WorkModuleSignoff')} w_flt
+            LEFT JOIN {tbl('WorkModuleInstance')} wi_flt ON w_flt.workModuleInstanceId = wi_flt.id
+            LEFT JOIN {tbl('WorkModule')} wm_flt ON wi_flt.workModuleId = wm_flt.id
+            WHERE {sub_where}
+        )""")
+    unsupported = [k for k in ('joint', 'regulatory', 'surgeon', 'laterality', 'facility', 'state',
+                                'surgery_scheduled', 'oncology', 'trauma', 'pediatric', 'preop', 'research')
+                   if args.get(k)]
+    return " AND ".join(conditions), unsupported
+
+
 def kpi_or_cases(args, date_field, metric_sql, fetch_cases=False, include_hold_user=False, exclude_outliers=False, avg_digital_lt=None):
     where = build_where_clause(args)
     df_filter = date_range_filter(date_field, args.get('date_from',''), args.get('date_to',''))
@@ -1144,12 +1200,54 @@ def kpi_or_cases(args, date_field, metric_sql, fetch_cases=False, include_hold_u
         df = client.query(query).to_dataframe()
         return jsonify({"cases": format_cases(df), "count": len(df)})
     else:
-        query = f"""
-        WITH {signoff_cte()}, {on_hold_cte()}
-        SELECT COUNT(DISTINCT f.id) as case_count, ROUND(AVG({metric_sql}), 1) as avg_lt
-        {case_joins()}
-        WHERE {where} AND {df_filter}
-        """
+        completed_where, unsupported = completed_case_supplement_where(args)
+        # Map date_field (which references vw_fact_case-joined signoff_dates/stage-log
+        # aliases sd./s. — identical aliases used in the completed-case supplement
+        # below, so date_range_filter's output SQL is reusable as-is) for the
+        # supplement query too.
+        completed_df_filter = date_range_filter(date_field, args.get('date_from',''), args.get('date_to',''))
+        if exclude_outliers:
+            completed_where = f"{completed_where} AND {outlier_exclusion_sql(avg_digital_lt)}"
+
+        if unsupported:
+            # An Advanced Filter we can't safely replicate against the raw Case
+            # table is active — skip the supplement and fall back to the
+            # original (COMPLETED-excluding) behavior for this request only,
+            # rather than silently ignore a filter the person explicitly set.
+            query = f"""
+            WITH {signoff_cte()}, {on_hold_cte()}
+            SELECT COUNT(DISTINCT f.id) as case_count, ROUND(AVG({metric_sql}), 1) as avg_lt
+            {case_joins()}
+            WHERE {where} AND {df_filter}
+            """
+        else:
+            query = f"""
+            WITH {signoff_cte()}, {on_hold_cte()},
+            existing_ids AS (
+                SELECT DISTINCT f.id
+                {case_joins()}
+                WHERE {where} AND {df_filter}
+            ),
+            completed_ids AS (
+                SELECT DISTINCT f.id
+                FROM {tbl('Case')} f
+                LEFT JOIN {tbl('CaseCategory')} cc ON f.caseCategoryId = cc.id
+                LEFT JOIN {tbl('CaseType')} ct ON f.caseTypeId = ct.id
+                LEFT JOIN {tbl('vw_lkup_stage_log_dates')} s ON f.id = s.caseId
+                LEFT JOIN signoff_dates sd ON f.id = sd.caseId
+                WHERE {completed_where} AND {completed_df_filter}
+            ),
+            combined_ids AS (
+                SELECT id FROM existing_ids
+                UNION DISTINCT
+                SELECT id FROM completed_ids
+            )
+            SELECT COUNT(DISTINCT ci.id) as case_count, ROUND(AVG({metric_sql}), 1) as avg_lt
+            FROM combined_ids ci
+            LEFT JOIN {tbl('vw_lkup_stage_log_dates')} s ON ci.id = s.caseId
+            LEFT JOIN signoff_dates sd ON ci.id = sd.caseId
+            LEFT JOIN on_hold_time oh ON ci.id = oh.caseId
+            """
         df = client.query(query).to_dataframe().fillna(0)
         row = df.iloc[0]
         return jsonify({"case_count": int(row.get('case_count', 0)), "avg_lt": round(float(row.get('avg_lt', 0)), 1)})
