@@ -871,6 +871,37 @@
       </div>
     </div>
     <!-- /PROCESS EFFICIENCY + EXCLUSION BREAKDOWN ROW -->
+
+    <!-- DESIGN TIME ROW -->
+    <div class="charts-row" style="grid-template-columns:1fr">
+      <div class="chart-card">
+        <div class="chart-hdr">
+          <div class="chart-title"><i class="fa fa-stopwatch" style="color:var(--accent-dark);margin-right:5px"></i>Design Time</div><button class="copy-btn" onclick="copyChart('dtChart','Design Time',event)"><i class="fa fa-copy"></i> Copy</button>
+          <div class="chart-controls">
+            <button class="chart-toggle active" data-group="dtBreak" onclick="setDtBreakdown('product',this)">By Product</button>
+            <button class="chart-toggle" data-group="dtBreak" onclick="setDtBreakdown('step',this)">By Step</button>
+            <button class="chart-toggle" data-group="dtBreak" onclick="setDtBreakdown('designer',this)">By Designer</button>
+            <button class="chart-toggle active" data-group="dtGran" onclick="setDtGranularity('monthly',this)">Monthly</button>
+            <button class="chart-toggle" data-group="dtGran" onclick="setDtGranularity('weekly',this)">Weekly</button>
+            <button class="chart-toggle" data-group="dtGran" onclick="setDtGranularity('daily',this)">Daily</button>
+            <button class="chart-toggle active" data-group="dtView" onclick="setDtView('chart',this)">Chart</button>
+            <button class="chart-toggle" data-group="dtView" onclick="setDtView('table',this)">Table</button>
+            <button class="chart-update-btn" onclick="loadDesignTime()"><i class="fa fa-sync-alt"></i> Update</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:24px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <div><span style="font-size:11px;color:var(--text-3)">Avg Actual</span><div style="font-size:20px;font-weight:700;color:var(--accent-dark)" id="dt-avg-actual">—</div></div>
+          <div><span style="font-size:11px;color:var(--text-3)">Avg Standard</span><div style="font-size:20px;font-weight:700;color:var(--text-2)" id="dt-avg-standard">—</div></div>
+          <span style="font-size:10px;color:var(--text-4)" id="dt-sub">Click Update</span>
+        </div>
+        <div class="chart-empty" id="dtChartEmpty"><i class="fa fa-stopwatch"></i><p>Click Update to load chart</p></div>
+        <div class="chart-wrap" id="dtChartWrap"><canvas id="dtChart"></canvas></div>
+        <div id="dtChartNote" style="font-size:10px;color:var(--text-4);padding:4px 14px 0"></div>
+        <div class="table-wrap" id="dtTableWrap" style="display:none;max-height:360px;overflow:auto"></div>
+        <div class="logic-caption">Average actual vs. standard design time per case, from the same validated signoff pairs used by Process Efficiency (workers only, last signoff per step per case, click-through/overnight-gap pairs excluded) — so these numbers always agree with Process Efficiency for the same filters. Solid line = actual minutes, dashed = standard minutes. Product/Step/Designer/date-range filters come from the global filter bar above; "By Product/Step/Designer" picks which dimension breaks out the lines (chart) or rows (table).</div>
+      </div>
+    </div>
+    <!-- /DESIGN TIME ROW -->
     </div><!-- /r3idDashboardBody -->
 
     <!-- CASE LIST — third section, always visible, outside R3ID and CamStar -->
@@ -1317,6 +1348,138 @@ function resetExclSettings(){
   document.getElementById('cs_ticksize_exclChart').value=12;
   document.getElementById('cs_ymax_exclChart').value='';
   if(lastExclData)renderExclChart(lastExclData);
+}
+
+// ── DESIGN TIME ──
+let dtBreakdownBy='product';
+let dtGranularity='monthly';
+let dtView='chart';
+let dtChartInstance=null;
+let lastDtData=null;
+const DT_COLORS=['#0284c7','#16a34a','#7c3aed','#d97706','#0891b2','#dc2626','#059669','#9333ea'];
+const DT_MAX_SERIES=8; // cap chart series for readability; Table view always shows every row
+
+function setDtBreakdown(v,btn){
+  dtBreakdownBy=v;
+  btn.closest('.chart-controls').querySelectorAll('.chart-toggle[data-group="dtBreak"]').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function setDtGranularity(v,btn){
+  dtGranularity=v;
+  btn.closest('.chart-controls').querySelectorAll('.chart-toggle[data-group="dtGran"]').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+function setDtView(v,btn){
+  dtView=v;
+  btn.closest('.chart-controls').querySelectorAll('.chart-toggle[data-group="dtView"]').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(lastDtData)renderDt(lastDtData);
+}
+
+function renderDt(data){
+  if(dtView==='table')renderDtTable(data);
+  else renderDtChart(data);
+}
+
+function renderDtChart(data){
+  if(dtChartInstance){dtChartInstance.destroy();dtChartInstance=null;}
+  const chartWrap=document.getElementById('dtChartWrap');
+  const emptyEl=document.getElementById('dtChartEmpty');
+  const noteEl=document.getElementById('dtChartNote');
+  document.getElementById('dtTableWrap').style.display='none';
+  const periods=data.periods||[];
+  const series=data.series||[];
+  if(!periods.length||!series.length){
+    chartWrap.classList.remove('show');
+    emptyEl.style.display='flex';
+    emptyEl.querySelector('p').textContent='No design-time data for these filters';
+    noteEl.textContent='';
+    return;
+  }
+  emptyEl.style.display='none';
+  chartWrap.classList.add('show');
+  if(!document.getElementById('dtChart')){chartWrap.innerHTML='<canvas id="dtChart"></canvas>';}
+  const ctx=document.getElementById('dtChart').getContext('2d');
+  // Rank by total case volume and cap series shown so the chart stays readable —
+  // Table view (toggle above) always lists every row regardless of this cap.
+  const ranked=[...series].sort((a,b)=>
+    (b.case_count||[]).reduce((x,y)=>x+(y||0),0) - (a.case_count||[]).reduce((x,y)=>x+(y||0),0)
+  );
+  const shown=ranked.slice(0,DT_MAX_SERIES);
+  const datasets=[];
+  shown.forEach((s,i)=>{
+    const c=DT_COLORS[i%DT_COLORS.length];
+    datasets.push({label:s.label,data:s.actual,borderColor:c,backgroundColor:c+'22',fill:false,tension:0.3,pointRadius:3,pointHoverRadius:5,spanGaps:true,datalabels:{display:false}});
+    datasets.push({label:s.label+' (Standard)',data:s.standard,borderColor:c,borderDash:[6,4],borderWidth:1.5,pointRadius:0,fill:false,spanGaps:true,datalabels:{display:false}});
+  });
+  dtChartInstance=new Chart(ctx,{type:'line',data:{labels:periods,datasets},options:{responsive:true,maintainAspectRatio:false,
+    plugins:{
+      legend:{display:true,position:'top',labels:{font:{size:10},boxWidth:9,padding:6,filter:item=>!item.text.includes('(Standard)')||shown.length<=3}},
+      tooltip:{backgroundColor:'#fff',borderColor:'#e5e7eb',borderWidth:1,titleColor:'#111827',bodyColor:'#374151',padding:8,callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y==null?'—':ctx.parsed.y+' min'}`}},
+      datalabels:{display:false}
+    },
+    scales:{
+      x:{ticks:{maxRotation:45,font:{size:12},color:'#111827'},grid:{color:'#e5e7eb'},border:{color:'#374151'}},
+      y:{beginAtZero:true,title:{display:true,text:'Minutes',color:'#374151'},ticks:{color:'#111827',font:{size:12}},grid:{color:'#e5e7eb'},border:{color:'#374151'}}
+    }
+  }});
+  noteEl.textContent = series.length>DT_MAX_SERIES
+    ? `Showing top ${DT_MAX_SERIES} of ${series.length} by case volume — switch to Table view to see all.`
+    : '';
+}
+
+function renderDtTable(data){
+  document.getElementById('dtChartWrap').classList.remove('show');
+  document.getElementById('dtChartEmpty').style.display='none';
+  document.getElementById('dtChartNote').textContent='';
+  const wrap=document.getElementById('dtTableWrap');
+  wrap.style.display='block';
+  const rows=data.table||[];
+  const by=data.breakdown_by||'product';
+  const byLabel=by==='product'?'Product':by==='step'?'Step':'Designer';
+  if(!rows.length){wrap.innerHTML='<div class="chart-empty" style="height:160px"><p>No design-time data for these filters</p></div>';return;}
+  const sorted=[...rows].sort((a,b)=>
+    a.period===b.period ? String(a[by]).localeCompare(String(b[by])) : String(a.period).localeCompare(String(b.period))
+  );
+  wrap.innerHTML=`<table class="nlq-results-table" style="width:100%">
+    <thead><tr>
+      <th>Period</th><th>${byLabel}</th>
+      <th style="text-align:right">Avg Actual (min)</th>
+      <th style="text-align:right">Avg Standard (min)</th>
+      <th style="text-align:right">Gap (min)</th>
+      <th style="text-align:right">Gap %</th>
+      <th style="text-align:right">Cases</th>
+    </tr></thead>
+    <tbody>${sorted.map(r=>`<tr>
+      <td>${esc(r.period)}</td>
+      <td>${esc(r[by])}</td>
+      <td style="text-align:right">${r.avg_actual_min}</td>
+      <td style="text-align:right">${r.avg_standard_min}</td>
+      <td style="text-align:right;color:${r.gap_min>0?'#E05A4E':'#16a34a'}">${r.gap_min>0?'+':''}${r.gap_min}</td>
+      <td style="text-align:right">${r.gap_pct==null?'—':(r.gap_pct>0?'+':'')+r.gap_pct+'%'}</td>
+      <td style="text-align:right">${r.case_count}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+async function loadDesignTime(){
+  document.getElementById('dt-avg-actual').innerHTML='<span class="dot-spinner"><span></span><span></span><span></span></span>';
+  document.getElementById('dt-avg-standard').textContent='—';
+  document.getElementById('dt-sub').textContent='Calculating...';
+  const emptyEl=document.getElementById('dtChartEmpty');
+  if(emptyEl)emptyEl.style.display='none';
+  try{
+    const qs=buildQS({granularity:dtGranularity,breakdown_by:dtBreakdownBy});
+    const res=await fetch(`${API}/analytics/design-time?${qs}`);
+    const data=await res.json();
+    lastDtData=data;
+    if(data.error){toast(data.error,'err');document.getElementById('dt-avg-actual').textContent='Error';return;}
+    document.getElementById('dt-avg-actual').textContent=(data.overall_avg_actual_min||0)+' min';
+    document.getElementById('dt-avg-standard').textContent=(data.overall_avg_standard_min||0)+' min';
+    const byNoun=dtBreakdownBy==='product'?'products':dtBreakdownBy==='step'?'steps':'designers';
+    document.getElementById('dt-sub').textContent=`${(data.series||[]).length} ${byNoun} · ${dtGranularity}`;
+    renderDt(data);
+  }catch(e){toast('Design time error','err');document.getElementById('dt-avg-actual').textContent='Error';}
 }
 
 // ── FIRST PASS YIELD ──
@@ -2044,6 +2207,7 @@ const CHART_STATS = {
   csOtdChart:  {label:'Team OTD',     valId:'cs-otd-avg',   subId:'cs-otd-sub'},
   utilChart:   {label:'Team Avg',     valId:'util-team-avg',subId:null},
   fpyChart:    {label:'Team Avg FPY', valId:'fpy-team-avg', subId:null},
+  dtChart:     {label:'Avg Actual',   valId:'dt-avg-actual',subId:'dt-sub'},
 };
 
 // Chart instance registry — needed to re-render at high res for copy
@@ -2056,6 +2220,7 @@ const CHART_INSTANCES = {
   csUtilChart: ()=>csUtilChart_,
   csFpyChart:  ()=>csFpyChart_,
   csOtdChart:  ()=>csOtdChart_,
+  dtChart:     ()=>dtChartInstance,
 };
 
 function copyChart(canvasId, label, e){

@@ -2360,6 +2360,131 @@ def process_efficiency_exclusions():
     except Exception as e:
         return handle_error(request.endpoint, e)
 
+@app.route("/analytics/design-time", methods=["GET"])
+def design_time():
+    """Average actual vs. standard design time, broken down by product, step,
+    or designer (pick one via breakdown_by; the others act as filters).
+
+    Reuses the exact same classified/valid-pair CTE as /analytics/process-efficiency
+    (_eff_core_query), so the case population, pairing logic, and standard-time
+    lookup (get_design_time + get_case_time_multiplier) are identical — these
+    numbers will always agree with the Process Efficiency chart for the same
+    filters, by construction. Purely additive: does not touch process_efficiency()
+    or any other existing endpoint.
+
+    Query params (all optional, same semantics as process-efficiency):
+      product, product_group, step, step_user, date_from, date_to, granularity
+      breakdown_by: 'product' (default) | 'step' | 'designer'
+    """
+    try:
+        args = request.args
+        granularity = args.get('granularity', 'monthly')
+        breakdown_by = args.get('breakdown_by', 'product').strip().lower()
+        if breakdown_by not in ('product', 'step', 'designer'):
+            breakdown_by = 'product'
+        breakdown_col = {'product': 'product', 'step': 'step_name', 'designer': 'worker_name'}[breakdown_by]
+
+        ist_sig = "TIMESTAMP_ADD(end_time, INTERVAL 330 MINUTE)"
+        if granularity == 'daily':
+            period_expr = f"FORMAT_DATE('%Y-%m-%d', {ist_sig})"
+        elif granularity == 'weekly':
+            period_expr = f"FORMAT_DATE('%G-W%V', {ist_sig})"
+        else:
+            period_expr = f"FORMAT_DATE('%Y-%m', {ist_sig})"
+
+        core = _eff_core_query(args)
+        query = f"""
+        WITH {core},
+        valid_only AS (
+          SELECT *, {period_expr} AS period
+          FROM classified WHERE pair_status = 'valid'
+        )
+        SELECT
+          worker_name, step_name, product, period, caseId,
+          laterality, preoperativeState, proposedIndication, designNotes,
+          actual_sec / 60.0 AS actual_min
+        FROM valid_only
+        ORDER BY period
+        """
+        df = client.query(query).to_dataframe()
+        if df.empty:
+            return jsonify({
+                "periods": [], "breakdown_by": breakdown_by, "series": [], "table": [],
+                "overall_avg_actual_min": 0, "overall_avg_standard_min": 0, "granularity": granularity
+            })
+
+        # Same multiplier + standard-time lookup as process_efficiency — must stay
+        # in Python since get_design_time reads the live Design Times Sheet.
+        df['time_multiplier'] = df.apply(
+            lambda r: get_case_time_multiplier(
+                r['laterality'], r['preoperativeState'], r['proposedIndication'], r['designNotes']
+            ), axis=1
+        )
+        df['standard_min'] = df.apply(
+            lambda r: get_design_time(r['step_name'], 'WORKER', r['product'], r['time_multiplier']) or 0, axis=1
+        )
+        # Only rows with a known standard time are meaningful for a standard-vs-actual
+        # comparison (same filter process_efficiency applies before computing eff%).
+        df_valid = df[df['standard_min'] > 0].copy()
+        if df_valid.empty:
+            return jsonify({
+                "periods": [], "breakdown_by": breakdown_by, "series": [], "table": [],
+                "overall_avg_actual_min": 0, "overall_avg_standard_min": 0, "granularity": granularity
+            })
+
+        periods = sorted(df_valid['period'].unique().tolist())
+        breakdown_values = sorted(df_valid[breakdown_col].unique().tolist())
+
+        series = []
+        table = []
+        for val in breakdown_values:
+            vdf = df_valid[df_valid[breakdown_col] == val]
+            actual_by_period, standard_by_period, count_by_period = [], [], []
+            for p in periods:
+                pdf = vdf[vdf['period'] == p]
+                if len(pdf) == 0:
+                    actual_by_period.append(None)
+                    standard_by_period.append(None)
+                    count_by_period.append(0)
+                    continue
+                avg_actual = round(float(pdf['actual_min'].mean()), 1)
+                avg_standard = round(float(pdf['standard_min'].mean()), 1)
+                n = int(len(pdf))
+                actual_by_period.append(avg_actual)
+                standard_by_period.append(avg_standard)
+                count_by_period.append(n)
+                table.append({
+                    'period': p,
+                    breakdown_by: val,
+                    'avg_actual_min': avg_actual,
+                    'avg_standard_min': avg_standard,
+                    'gap_min': round(avg_actual - avg_standard, 1),
+                    'gap_pct': round((avg_actual - avg_standard) / avg_standard * 100, 1) if avg_standard else None,
+                    'case_count': n,
+                })
+            series.append({
+                'label': shorten_product(val) if breakdown_by == 'product' else val,
+                'full_label': val,
+                'actual': actual_by_period,
+                'standard': standard_by_period,
+                'case_count': count_by_period,
+            })
+
+        overall_actual = round(float(df_valid['actual_min'].mean()), 1)
+        overall_standard = round(float(df_valid['standard_min'].mean()), 1)
+
+        return jsonify({
+            'periods': periods,
+            'breakdown_by': breakdown_by,
+            'series': series,
+            'table': sorted(table, key=lambda r: (r['period'], r[breakdown_by])),
+            'overall_avg_actual_min': overall_actual,
+            'overall_avg_standard_min': overall_standard,
+            'granularity': granularity,
+        })
+    except Exception as e:
+        return handle_error(request.endpoint, e)
+
 @app.route("/analytics/fpy", methods=["GET"])
 def first_pass_yield():
     """Calculate FPY per worker: % of cases where reviewer's FIRST signoff was ACCEPT.
