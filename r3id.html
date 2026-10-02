@@ -885,9 +885,18 @@
             <button class="chart-toggle" data-group="dtGran" onclick="setDtGranularity('weekly',this)">Weekly</button>
             <button class="chart-toggle" data-group="dtGran" onclick="setDtGranularity('daily',this)">Daily</button>
             <button class="chart-toggle active" data-group="dtView" onclick="setDtView('chart',this)">Chart</button>
+            <button class="chart-toggle" data-group="dtView" onclick="setDtView('rank',this)">Ranking</button>
             <button class="chart-toggle" data-group="dtView" onclick="setDtView('table',this)">Table</button>
             <button class="chart-update-btn" onclick="loadDesignTime()"><i class="fa fa-sync-alt"></i> Update</button>
           </div>
+        </div>
+        <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">
+          <div class="ms-wrap" style="width:240px">
+            <div class="ms-label">Filter to Products (optional)</div>
+            <button class="ms-btn" onclick="toggleDD('dtProductName')"><span class="ms-btn-text" id="lbl-dtProductName">All Products</span><span class="ms-btn-icons"><i class="fa fa-times ms-clear-x" id="clr-dtProductName" onclick="clearDD('dtProductName',event)"></i><i class="fa fa-chevron-down ms-chevron"></i></span></button>
+            <div class="ms-dropdown" id="dd-dtProductName"><div class="ms-search"><input placeholder="Search products..." oninput="filterList('dtProductName',this.value)"/></div><div class="ms-list" id="list-dtProductName"></div><div class="ms-footer"><span class="ms-count" id="cnt-dtProductName">0 selected</span><div class="ms-footer-btns"><button class="ms-clearall" onclick="clearDD('dtProductName',event)">Clear</button><button class="ms-selectall" onclick="selectAll('dtProductName')">All</button></div></div></div>
+          </div>
+          <span style="font-size:9px;color:var(--text-4);padding-bottom:7px">Overrides the main Product filter for this chart only — leave empty to use the main filter bar</span>
         </div>
         <div style="display:flex;align-items:center;gap:24px;padding:8px 14px;border-bottom:1px solid var(--border);flex-wrap:wrap">
           <div><span style="font-size:11px;color:var(--text-3)">Avg Actual</span><div style="font-size:20px;font-weight:700;color:var(--accent-dark)" id="dt-avg-actual">—</div></div>
@@ -990,7 +999,7 @@ let PRODUCTS=[],PRODUCT_GROUPS_LIVE={},CLEARED_LIVE=[],CUSTOM_LIVE=[];
 const LAT_OPTS=[{val:'RIGHT',lbl:'Right'},{val:'LEFT',lbl:'Left'},{val:'BILATERAL',lbl:'Bilateral'},{val:'NA',lbl:'Not Available'}];
 const FLAG_OPTS=[{val:'surgery_scheduled',lbl:'Surgery Scheduled'},{val:'oncology',lbl:'Oncology'},{val:'trauma',lbl:'Trauma'},{val:'pediatric',lbl:'Pediatric'},{val:'preop',lbl:'Pre-op Planning Only'},{val:'research',lbl:'Research Case'}];
 const REG_OPTS=[{val:'Cleared',lbl:'Cleared'},{val:'Custom',lbl:'Custom'}];
-const SEL={productGroup:[],productName:[],regulatory:[],laterality:[],flags:[],step:[],stepUser:[],csStep:[],csUser:[],caseType:[],nlqProductGroup:[],nlqProductName:[],nlqCaseType:[],nlqStep:[],nlqStepUser:[]};
+const SEL={productGroup:[],productName:[],regulatory:[],laterality:[],flags:[],step:[],stepUser:[],csStep:[],csUser:[],caseType:[],nlqProductGroup:[],nlqProductName:[],nlqCaseType:[],nlqStep:[],nlqStepUser:[],dtProductName:[]};
 let userRoleFilter='worker'; // 'worker' (Designed) or 'reviewer' (Reviewed). Only sent to backend when a user is selected.
 function setUserRole(role,btn){
   userRoleFilter=role;
@@ -1356,8 +1365,24 @@ let dtGranularity='monthly';
 let dtView='chart';
 let dtChartInstance=null;
 let lastDtData=null;
+let dtSortKey='period';
+let dtSortAsc=true;
 const DT_COLORS=['#0284c7','#16a34a','#7c3aed','#d97706','#0891b2','#dc2626','#059669','#9333ea'];
 const DT_MAX_SERIES=8; // cap chart series for readability; Table view always shows every row
+
+// Local product filter scoped to this chart only. If set, it overrides the
+// main filter bar's product/product_group selection for Design Time requests
+// only — every other filter (date range, step, designer, flags) still comes
+// from the shared filter bar via buildQS().
+function buildDtQS(extras={}){
+  const params=new URLSearchParams(buildQS(extras));
+  if(SEL.dtProductName.length){
+    params.delete('product');
+    params.delete('product_group');
+    params.set('product',SEL.dtProductName.join(','));
+  }
+  return params.toString();
+}
 
 function setDtBreakdown(v,btn){
   dtBreakdownBy=v;
@@ -1378,6 +1403,7 @@ function setDtView(v,btn){
 
 function renderDt(data){
   if(dtView==='table')renderDtTable(data);
+  else if(dtView==='rank')renderDtRankChart(data);
   else renderDtChart(data);
 }
 
@@ -1428,6 +1454,72 @@ function renderDtChart(data){
     : '';
 }
 
+// "Ranking" view: collapses the period-level data into one weighted average
+// per breakdown value (product/step/designer) across the whole selected date
+// range, sorted longest-actual-time-first — e.g. "which product takes the
+// longest" at a glance, rather than a trend over time.
+function renderDtRankChart(data){
+  if(dtChartInstance){dtChartInstance.destroy();dtChartInstance=null;}
+  document.getElementById('dtTableWrap').style.display='none';
+  const chartWrap=document.getElementById('dtChartWrap');
+  const emptyEl=document.getElementById('dtChartEmpty');
+  const noteEl=document.getElementById('dtChartNote');
+  const rows=data.table||[];
+  const by=data.breakdown_by||'product';
+  if(!rows.length){
+    chartWrap.classList.remove('show');
+    emptyEl.style.display='flex';
+    emptyEl.querySelector('p').textContent='No design-time data for these filters';
+    noteEl.textContent='';
+    return;
+  }
+  emptyEl.style.display='none';
+  chartWrap.classList.add('show');
+  if(!document.getElementById('dtChart')){chartWrap.innerHTML='<canvas id="dtChart"></canvas>';}
+  const ctx=document.getElementById('dtChart').getContext('2d');
+
+  // Weighted by case_count (not a flat average of per-period averages), so a
+  // period with more cases counts proportionally more.
+  const agg={};
+  rows.forEach(r=>{
+    const key=r[by];
+    if(!agg[key])agg[key]={sumActual:0,sumStandard:0,cases:0};
+    agg[key].sumActual   += (r.avg_actual_min||0)   * (r.case_count||0);
+    agg[key].sumStandard += (r.avg_standard_min||0) * (r.case_count||0);
+    agg[key].cases       += (r.case_count||0);
+  });
+  const entries=Object.entries(agg).map(([label,v])=>({
+    label,
+    actual: v.cases ? Math.round((v.sumActual/v.cases)*10)/10 : 0,
+    standard: v.cases ? Math.round((v.sumStandard/v.cases)*10)/10 : 0,
+    cases: v.cases,
+  })).sort((a,b)=>b.actual-a.actual); // longest actual time first
+
+  const labels=entries.map(e=>e.label);
+  dtChartInstance=new Chart(ctx,{type:'bar',data:{labels,datasets:[
+    {label:'Avg Actual (min)',data:entries.map(e=>e.actual),backgroundColor:'#005F72cc',borderColor:'#005F72',borderWidth:1,borderRadius:4,barPercentage:0.7,datalabels:{display:false}},
+    {label:'Avg Standard (min)',data:entries.map(e=>e.standard),type:'line',borderColor:'#9ca3af',borderDash:[6,4],borderWidth:2,pointRadius:0,fill:false,datalabels:{display:false}},
+  ]},options:{responsive:true,maintainAspectRatio:false,
+    plugins:{
+      legend:{display:true,position:'top',labels:{font:{size:11},boxWidth:10,padding:8}},
+      tooltip:{backgroundColor:'#fff',borderColor:'#e5e7eb',borderWidth:1,titleColor:'#111827',bodyColor:'#374151',padding:8,callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y} min`,afterLabel:ctx=>`Cases: ${entries[ctx.dataIndex].cases}`}},
+      datalabels:{display:false}
+    },
+    scales:{
+      x:{ticks:{maxRotation:45,font:{size:11},color:'#111827'},grid:{color:'#e5e7eb'},border:{color:'#374151'}},
+      y:{beginAtZero:true,title:{display:true,text:'Minutes',color:'#374151'},ticks:{color:'#111827',font:{size:12}},grid:{color:'#e5e7eb'},border:{color:'#374151'}}
+    }
+  }});
+  const byNoun=by==='product'?'Products':by==='step'?'Steps':'Designers';
+  noteEl.textContent=`${byNoun} ranked by avg actual design time, longest first, across the full selected date range.`;
+}
+
+function sortDtTable(col){
+  if(dtSortKey===col)dtSortAsc=!dtSortAsc;
+  else{dtSortKey=col;dtSortAsc=true;}
+  if(lastDtData)renderDtTable(lastDtData);
+}
+
 function renderDtTable(data){
   document.getElementById('dtChartWrap').classList.remove('show');
   document.getElementById('dtChartEmpty').style.display='none';
@@ -1438,17 +1530,35 @@ function renderDtTable(data){
   const by=data.breakdown_by||'product';
   const byLabel=by==='product'?'Product':by==='step'?'Step':'Designer';
   if(!rows.length){wrap.innerHTML='<div class="chart-empty" style="height:160px"><p>No design-time data for these filters</p></div>';return;}
-  const sorted=[...rows].sort((a,b)=>
-    a.period===b.period ? String(a[by]).localeCompare(String(b[by])) : String(a.period).localeCompare(String(b.period))
-  );
+
+  const numericCols=new Set(['avg_actual_min','avg_standard_min','gap_min','gap_pct','case_count']);
+  const keyFor=col=>col==='breakdown'?by:col;
+  const sortKey=keyFor(dtSortKey);
+  const sorted=[...rows].sort((a,b)=>{
+    let av=a[sortKey], bv=b[sortKey];
+    if(numericCols.has(sortKey)){
+      av=(av===null||av===undefined)?-Infinity:parseFloat(av);
+      bv=(bv===null||bv===undefined)?-Infinity:parseFloat(bv);
+      return dtSortAsc?av-bv:bv-av;
+    }
+    av=String(av??''); bv=String(bv??'');
+    return dtSortAsc?av.localeCompare(bv):bv.localeCompare(av);
+  });
+  const sortIcon=col=>{
+    if(keyFor(col)!==sortKey)return '<i class="fa fa-sort" style="opacity:.3"></i>';
+    return `<i class="fa fa-sort${dtSortAsc?'-up':'-down'}"></i>`;
+  };
+  const th=(col,label,alignRight)=>`<th onclick="sortDtTable('${col}')" style="cursor:pointer${alignRight?';text-align:right':''}">${label} ${sortIcon(col)}</th>`;
+
   wrap.innerHTML=`<table class="nlq-results-table" style="width:100%">
     <thead><tr>
-      <th>Period</th><th>${byLabel}</th>
-      <th style="text-align:right">Avg Actual (min)</th>
-      <th style="text-align:right">Avg Standard (min)</th>
-      <th style="text-align:right">Gap (min)</th>
-      <th style="text-align:right">Gap %</th>
-      <th style="text-align:right">Cases</th>
+      ${th('period','Period')}
+      ${th('breakdown',byLabel)}
+      ${th('avg_actual_min','Avg Actual (min)',true)}
+      ${th('avg_standard_min','Avg Standard (min)',true)}
+      ${th('gap_min','Gap (min)',true)}
+      ${th('gap_pct','Gap %',true)}
+      ${th('case_count','Cases',true)}
     </tr></thead>
     <tbody>${sorted.map(r=>`<tr>
       <td>${esc(r.period)}</td>
@@ -1469,7 +1579,7 @@ async function loadDesignTime(){
   const emptyEl=document.getElementById('dtChartEmpty');
   if(emptyEl)emptyEl.style.display='none';
   try{
-    const qs=buildQS({granularity:dtGranularity,breakdown_by:dtBreakdownBy});
+    const qs=buildDtQS({granularity:dtGranularity,breakdown_by:dtBreakdownBy});
     const res=await fetch(`${API}/analytics/design-time?${qs}`);
     const data=await res.json();
     lastDtData=data;
@@ -2562,6 +2672,7 @@ function applyConfig(data){
   CUSTOM_LIVE=data.custom||[];
   buildList('productGroup',Object.keys(PRODUCT_GROUPS_LIVE).map(v=>({val:v,lbl:v})));
   buildList('productName',PRODUCTS.map(v=>({val:v,lbl:v})));
+  buildList('dtProductName',PRODUCTS.map(v=>({val:v,lbl:v})));
   // Also populate the report product + group lists if they're already built
   buildRptProductList();
   buildNlqProductList();
@@ -2686,7 +2797,7 @@ function onCheck(id,val,checked){
   if(id==='productName'){clearTimeout(window._caseTypeTimer);window._caseTypeTimer=setTimeout(loadCaseTypes,300);}
 }
 function clearDD(id,e){if(e){e.stopPropagation();e.preventDefault();}SEL[id]=[];document.getElementById(`list-${id}`)?.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=false);updateLabel(id);updateCount(id);updateClearBtn(id);document.getElementById(`dd-${id}`)?.classList.remove('open');document.getElementById(`dd-${id}`)?.previousElementSibling?.classList.remove('open');}
-const LBLS={productGroup:'All Groups',productName:'All Products',regulatory:'All',laterality:'All',flags:'All Cases',step:'All Steps',stepUser:'All Users',csStep:'All Steps',csUser:'All Users',caseType:'All Types'};
+const LBLS={productGroup:'All Groups',productName:'All Products',regulatory:'All',laterality:'All',flags:'All Cases',step:'All Steps',stepUser:'All Users',csStep:'All Steps',csUser:'All Users',caseType:'All Types',dtProductName:'All Products'};
 function updateLabel(id){const sel=SEL[id],lbl=document.getElementById(`lbl-${id}`);if(!lbl)return;if(!sel||sel.length===0)lbl.textContent=LBLS[id]||'All';else if(sel.length===1)lbl.textContent=sel[0].length>24?sel[0].slice(0,22)+'...':sel[0];else lbl.textContent=`${sel.length} selected`;}
 function updateCount(id){const c=document.getElementById(`cnt-${id}`);if(c)c.textContent=`${(SEL[id]||[]).length} selected`;}
 function updateClearBtn(id){const btn=document.getElementById(`clr-${id}`);if(btn)btn.classList.toggle('show',SEL[id]?.length>0);}
